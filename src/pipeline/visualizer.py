@@ -1,7 +1,7 @@
 """
 Interactive Visual Quality & Stationarity Inspection Module.
 Generates diagnostic plots for EMG SNR/stationarity, ECG R-peaks, Opto/Sync alignment,
-Neuropixel drift, multi-channel raw signal overview, and scrollable interactive HTML dashboards.
+Neuropixel drift, multi-channel raw signal overview, and Optogenetics Phase Response Curves (PRC).
 """
 from pathlib import Path
 import numpy as np
@@ -14,7 +14,8 @@ from .models import SessionResults
 def generate_interactive_emg_html(results: SessionResults, output_dir: Path) -> Path:
     """
     Generate an interactive, scrollable Plotly HTML file allowing full-session
-    navigation and high-resolution waveform inspection of diaphragm EMG.
+    navigation and high-resolution waveform inspection of diaphragm EMG with
+    translucent shaded laser pulse overlays.
     """
     import plotly.graph_objects as go
     from plotly.subplots import make_subplots
@@ -85,6 +86,18 @@ def generate_interactive_emg_html(results: SessionResults, output_dir: Path) -> 
             row=3, col=1
         )
 
+    # Overlay translucent shaded laser pulse spans if opto pulses exist
+    if results.opto is not None and len(results.opto.onsets) > 0:
+        for i, opto_start in enumerate(results.opto.onsets):
+            opto_dur = results.opto.durations[i] if i < len(results.opto.durations) else 0.1
+            opto_end = opto_start + opto_dur
+            fig.add_vrect(
+                x0=opto_start, x1=opto_end,
+                fillcolor="rgba(255, 69, 0, 0.25)",
+                layer="below", line_width=0,
+                row="all", col=1
+            )
+
     # Add Range Slider & Quick View Buttons
     t_max = time[-1] if len(time) > 0 else 1.0
     fig.update_xaxes(title_text="Time (seconds)", row=3, col=1)
@@ -103,12 +116,18 @@ def generate_interactive_emg_html(results: SessionResults, output_dir: Path) -> 
         row=1, col=1
     )
 
-    # Default initial zoom window to 0-10 seconds
-    fig.update_xaxes(range=[0, min(10.0, t_max)])
+    # Set initial zoom window to start of first opto pulse or 0-10 seconds
+    if results.opto is not None and len(results.opto.onsets) > 0:
+        first_opto = results.opto.onsets[0]
+        init_min = max(0, first_opto - 2.0)
+        init_max = min(t_max, first_opto + 8.0)
+        fig.update_xaxes(range=[init_min, init_max])
+    else:
+        fig.update_xaxes(range=[0, min(10.0, t_max)])
 
     fig.update_layout(
         height=900,
-        title_text=f"Interactive Diaphragm EMG Recording Inspection - {results.animal_id} {results.session_id}",
+        title_text=f"Interactive Diaphragm EMG & Translucent Laser Pulse Overlay - {results.animal_id} {results.session_id}",
         hovermode="x unified",
         template="plotly_white"
     )
@@ -116,6 +135,49 @@ def generate_interactive_emg_html(results: SessionResults, output_dir: Path) -> 
     html_path = output_dir / f"{results.animal_id}_{results.session_id}_diaphragm_interactive.html"
     fig.write_html(str(html_path), include_plotlyjs='cdn')
     return html_path
+
+def plot_opto_phase_response(results: SessionResults, output_dir: Path) -> Optional[Path]:
+    """
+    Generate Phase Response Curve (PRC) plot showing Opto Stimulus Phase (phi)
+    vs. Normalized Phase Shift (delta_phi) to evaluate inspiration advances & delays.
+    """
+    opto_phase = results.opto_phase
+    if opto_phase is None or len(opto_phase.trials) == 0:
+        return None
+
+    trials = opto_phase.trials
+    phis = np.array([tr.opto_phase_phi for tr in trials])
+    delta_phis = np.array([tr.phase_shift_delta for tr in trials])
+
+    fig, axes = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
+
+    # Subplot 1: Scatter plot of all trials (Phase Advance < 0 vs Phase Delay > 0)
+    axes[0].scatter(phis[delta_phis >= 0], delta_phis[delta_phis >= 0], color='crimson', alpha=0.7, label='Phase Delay (Postpones Next Inspiration)')
+    axes[0].scatter(phis[delta_phis < 0], delta_phis[delta_phis < 0], color='blue', alpha=0.7, label='Phase Advance (Speeds Up Next Inspiration)')
+    axes[0].axhline(y=0.0, color='black', linestyle='--', linewidth=1.2)
+    
+    # Binned trendline
+    if len(opto_phase.phase_bins) > 0:
+        axes[0].plot(opto_phase.phase_bins, opto_phase.mean_phase_shift_by_bin, color='black', linewidth=2.0, marker='o', label='Binned Mean PRC')
+
+    axes[0].set_title(f"Optogenetics Respiratory Phase Response Curve (PRC) - {results.animal_id}")
+    axes[0].set_ylabel("Normalized Phase Shift Δϕ\n(>0 = Delay, <0 = Advance)")
+    axes[0].legend(loc='upper right')
+    axes[0].grid(True, linestyle=':', alpha=0.6)
+
+    # Subplot 2: Histogram of Opto Stimulus Phasing Across Respiratory Cycle
+    axes[1].hist(phis, bins=np.linspace(0.0, 1.0, 11), color='orangered', edgecolor='black', alpha=0.7)
+    axes[1].set_title(f"Laser Stimulus Phase Distribution ({len(trials)} opto trials total)")
+    axes[1].set_xlabel("Respiratory Cycle Phase ϕ (0 = Inspiration Onset, 1 = Next Inspiration)")
+    axes[1].set_ylabel("Laser Trial Count")
+    axes[1].set_xlim(0.0, 1.0)
+    axes[1].grid(True, linestyle=':', alpha=0.6)
+
+    plt.tight_layout()
+    prc_path = output_dir / f"{results.animal_id}_{results.session_id}_opto_prc.png"
+    fig.savefig(prc_path, dpi=200)
+    plt.close(fig)
+    return prc_path
 
 def generate_diagnostic_dashboard(results: SessionResults, output_dir: Path) -> Dict[str, Path]:
     """
@@ -137,6 +199,16 @@ def generate_diagnostic_dashboard(results: SessionResults, output_dir: Path) -> 
         generated_files['diaphragm_interactive_html'] = html_emg_path
     except Exception as e:
         print(f" -> Note: Interactive HTML dashboard generation warning: {e}")
+
+    # -------------------------------------------------------------
+    # 0.1 Opto Phase Response Curve (PRC) Diagnostic Plot
+    # -------------------------------------------------------------
+    try:
+        prc_path = plot_opto_phase_response(results, output_dir)
+        if prc_path:
+            generated_files['opto_prc'] = prc_path
+    except Exception as e:
+        print(f" -> Note: PRC plot generation warning: {e}")
 
     # -------------------------------------------------------------
     # 1. Multi-Channel Raw Overview Plot (Inspect All Channels)

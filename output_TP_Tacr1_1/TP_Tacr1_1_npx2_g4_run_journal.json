@@ -1,6 +1,6 @@
 {
-    "timestamp": "2026-07-29T16:24:27.512909",
-    "git_commit": "1a8a6a4816eab37448652abe4d4e475f9cbc5a39 (dirty)",
+    "timestamp": "2026-07-29T16:49:14.003769",
+    "git_commit": "a765a40a34b124c757727f34176ddded59a32292 (dirty)",
     "python_version": "3.12.13 | packaged by conda-forge | (main, Mar  5 2026, 16:36:12) [MSC v.1944 64 bit (AMD64)]",
     "platform": "win32",
     "animal_id": "TP_Tacr1_1",
@@ -20,7 +20,7 @@
             "notch_freq": 60.0,
             "rectify": true,
             "smoothing_window_ms": 50.0,
-            "peak_threshold_sd": 2.5,
+            "peak_threshold_sd": 0.5,
             "min_breath_duration_ms": 100.0,
             "min_inter_breath_interval_ms": 150.0,
             "apnea_threshold_s": 2.0
@@ -39,7 +39,7 @@
             "sync_channel_index": 7,
             "opto_channel_index": 6,
             "fs": 10000.0,
-            "pulse_threshold_v": 2.5,
+            "pulse_threshold_v": 0.6,
             "min_pulse_width_ms": 1.0
         },
         "ephys": {
@@ -51,18 +51,22 @@
     },
     "execution_summary": {
         "duration_seconds": 703.4100437505085,
-        "breaths_detected": 856,
-        "mean_respiratory_rate_bpm": 80.00294380953558,
+        "breaths_detected": 924,
+        "mean_respiratory_rate_bpm": 81.2230627731292,
         "emg_mean_snr_db": 40.14756618420838,
-        "apnea_events_count": 10,
+        "apnea_events_count": 0,
         "r_peaks_detected": 0,
         "mean_heart_rate_bpm": 0.0,
         "hrv_sdnn_ms": 0.0,
         "sync_pulses_count": 0,
-        "opto_pulses_count": 0,
+        "opto_pulses_count": 75,
+        "opto_trials_analyzed": 75,
+        "opto_phase_delays_count": 32,
+        "opto_phase_advances_count": 15,
         "neuropixel_units_count": 8,
         "diagnostic_plots": {
             "diaphragm_interactive_html": "output_TP_Tacr1_1\\TP_Tacr1_1_npx2_g4_diaphragm_interactive.html",
+            "opto_prc": "output_TP_Tacr1_1\\TP_Tacr1_1_npx2_g4_opto_prc.png",
             "raw_all_channels": "output_TP_Tacr1_1\\TP_Tacr1_1_npx2_g4_raw_all_channels.png",
             "emg_stationarity": "output_TP_Tacr1_1\\TP_Tacr1_1_npx2_g4_emg_stationarity.png",
             "ecg_rpeaks": "output_TP_Tacr1_1\\TP_Tacr1_1_npx2_g4_ecg_rpeaks.png",

@@ -72,6 +72,8 @@ class PipelineConfig:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'PipelineConfig':
+        if "config" in data:
+            data = data["config"]
         raw_dir = Path(data.get('raw_data_dir', './raw_data'))
         out_dir = Path(data.get('output_dir', './output'))
         emg_cfg = EMGConfig(**data.get('emg', {}))

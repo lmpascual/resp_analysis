@@ -14,6 +14,7 @@ from .io.io_ephys import read_alf_spikes, generate_synthetic_ephys
 from .processors.proc_emg import process_emg
 from .processors.proc_ecg import process_ecg
 from .processors.proc_sync_opto import extract_pulse_events
+from .processors.proc_opto_phase import analyze_opto_respiratory_phase
 from .processors.proc_ephys import compute_respiratory_modulation
 from .journaler import checkpoint_approve_parameters, write_run_journal
 from .visualizer import generate_diagnostic_dashboard
@@ -70,6 +71,9 @@ def run_pipeline(config: PipelineConfig, interactive: bool = True) -> Optional[S
     sync_pulses = extract_pulse_events(analog_data.sync_raw, analog_data.time_vector, config.sync_opto)
     opto_pulses = extract_pulse_events(analog_data.opto_raw, analog_data.time_vector, config.sync_opto)
 
+    print(" -> Analyzing Optogenetic Stimulus Phase & Respiratory Perturbation (Advances / Delays)...")
+    opto_phase_res = analyze_opto_respiratory_phase(emg_results, opto_pulses)
+
     ephys_mod = {}
     if ephys_data is not None:
         print(" -> Computing Neuropixel Unit Respiratory Modulation & Depth Rasters...")
@@ -83,7 +87,8 @@ def run_pipeline(config: PipelineConfig, interactive: bool = True) -> Optional[S
         ecg=ecg_results,
         sync=sync_pulses,
         opto=opto_pulses,
-        ephys=ephys_data
+        ephys=ephys_data,
+        opto_phase=opto_phase_res
     )
 
     # Step 4: Generate Interactive Visual Diagnostic Plots
@@ -102,6 +107,9 @@ def run_pipeline(config: PipelineConfig, interactive: bool = True) -> Optional[S
         "hrv_sdnn_ms": ecg_results.hrv_sdnn,
         "sync_pulses_count": len(sync_pulses.onsets),
         "opto_pulses_count": len(opto_pulses.onsets),
+        "opto_trials_analyzed": opto_phase_res.num_opto_pulses,
+        "opto_phase_delays_count": opto_phase_res.phase_delays_count,
+        "opto_phase_advances_count": opto_phase_res.phase_advances_count,
         "neuropixel_units_count": len(ephys_data.unit_ids) if ephys_data else 0,
         "diagnostic_plots": {k: str(v) for k, v in generated_plots.items()}
     }

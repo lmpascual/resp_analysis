@@ -58,3 +58,4 @@ class SessionResults:
     sync: PulseEvents
     opto: PulseEvents
     ephys: Optional[EphysData] = None
+    opto_phase: Any = None
