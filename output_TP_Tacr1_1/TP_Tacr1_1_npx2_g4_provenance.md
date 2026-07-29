@@ -1,9 +1,9 @@
 # Analysis Provenance & Reproduction Journal
 
-- **Timestamp**: `2026-07-29T16:15:06.509297`
+- **Timestamp**: `2026-07-29T16:24:27.512909`
 - **Subject**: `TP_Tacr1_1`
 - **Session**: `npx2_g4`
-- **Git Commit**: `df4f4604aa86a3862cfb3b984f4113f401cb6d47 (dirty)`
+- **Git Commit**: `1a8a6a4816eab37448652abe4d4e475f9cbc5a39 (dirty)`
 - **Python Version**: `3.12.13`
 - **Raw Data Directory**: `Z:\ramirezlab\pascual\rec_data\TP_Tacr1_1_npx2_g4`
 
@@ -49,6 +49,7 @@
   "opto_pulses_count": 0,
   "neuropixel_units_count": 8,
   "diagnostic_plots": {
+    "diaphragm_interactive_html": "output_TP_Tacr1_1\\TP_Tacr1_1_npx2_g4_diaphragm_interactive.html",
     "raw_all_channels": "output_TP_Tacr1_1\\TP_Tacr1_1_npx2_g4_raw_all_channels.png",
     "emg_stationarity": "output_TP_Tacr1_1\\TP_Tacr1_1_npx2_g4_emg_stationarity.png",
     "ecg_rpeaks": "output_TP_Tacr1_1\\TP_Tacr1_1_npx2_g4_ecg_rpeaks.png",

@@ -1,7 +1,7 @@
 """
 Interactive Visual Quality & Stationarity Inspection Module.
 Generates diagnostic plots for EMG SNR/stationarity, ECG R-peaks, Opto/Sync alignment,
-Neuropixel drift, and multi-channel raw signal overview.
+Neuropixel drift, multi-channel raw signal overview, and scrollable interactive HTML dashboards.
 """
 from pathlib import Path
 import numpy as np
@@ -11,10 +11,116 @@ import matplotlib.pyplot as plt
 from typing import Optional, Dict, Any
 from .models import SessionResults
 
+def generate_interactive_emg_html(results: SessionResults, output_dir: Path) -> Path:
+    """
+    Generate an interactive, scrollable Plotly HTML file allowing full-session
+    navigation and high-resolution waveform inspection of diaphragm EMG.
+    """
+    import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
+
+    time = results.analog_raw.time_vector
+    emg_raw = results.analog_raw.emg_raw
+    emg_filt = results.emg.filtered
+    emg_env = results.emg.envelope
+    onsets = results.emg.breath_onsets
+
+    # Subsample for WebGL rendering performance if array is massive (>300k points)
+    max_pts = 300000
+    if len(time) > max_pts:
+        step = len(time) // max_pts
+        time_sub = time[::step]
+        raw_sub = emg_raw[::step]
+        filt_sub = emg_filt[::step]
+        env_sub = emg_env[::step]
+    else:
+        time_sub = time
+        raw_sub = emg_raw
+        filt_sub = emg_filt
+        env_sub = emg_env
+
+    fig = make_subplots(
+        rows=3, cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.08,
+        subplot_titles=(
+            f"Diaphragm EMG Raw & Bandpass Filtered Waveforms - {results.animal_id} {results.session_id}",
+            "Diaphragm EMG Envelope & Breath Onset Peaks",
+            "Instantaneous Respiratory Rate (Breaths / min)"
+        )
+    )
+
+    # Subplot 1: Raw vs Filtered EMG
+    fig.add_trace(
+        go.Scattergl(x=time_sub, y=raw_sub, mode='lines', name='Raw EMG',
+                     line=dict(color='rgba(128, 128, 128, 0.5)', width=1)),
+        row=1, col=1
+    )
+    fig.add_trace(
+        go.Scattergl(x=time_sub, y=filt_sub, mode='lines', name='Filtered (300-3000 Hz)',
+                     line=dict(color='rgba(30, 144, 255, 0.8)', width=1)),
+        row=1, col=1
+    )
+
+    # Subplot 2: Envelope & Breath Onset Peaks
+    fig.add_trace(
+        go.Scattergl(x=time_sub, y=env_sub, mode='lines', name='Envelope',
+                     line=dict(color='darkred', width=1.5)),
+        row=2, col=1
+    )
+    if len(onsets) > 0:
+        peak_y = np.interp(onsets, time_sub, env_sub)
+        fig.add_trace(
+            go.Scatter(x=onsets, y=peak_y, mode='markers', name='Breath Onset',
+                       marker=dict(symbol='triangle-up', color='green', size=8)),
+            row=2, col=1
+        )
+
+    # Subplot 3: Instantaneous RR
+    if len(onsets) > 1:
+        rr = results.emg.instantaneous_rr
+        fig.add_trace(
+            go.Scattergl(x=onsets[1:], y=rr, mode='lines+markers', name='Breath Rate (bpm)',
+                         line=dict(color='purple', width=1.5), marker=dict(size=4)),
+            row=3, col=1
+        )
+
+    # Add Range Slider & Quick View Buttons
+    t_max = time[-1] if len(time) > 0 else 1.0
+    fig.update_xaxes(title_text="Time (seconds)", row=3, col=1)
+    fig.update_xaxes(
+        rangeslider=dict(visible=True),
+        rangeselector=dict(
+            buttons=list([
+                dict(count=5, label="5s", step="second", stepmode="backward"),
+                dict(count=15, label="15s", step="second", stepmode="backward"),
+                dict(count=30, label="30s", step="second", stepmode="backward"),
+                dict(count=60, label="1m", step="second", stepmode="backward"),
+                dict(count=300, label="5m", step="second", stepmode="backward"),
+                dict(step="all", label="Full Session")
+            ])
+        ),
+        row=1, col=1
+    )
+
+    # Default initial zoom window to 0-10 seconds
+    fig.update_xaxes(range=[0, min(10.0, t_max)])
+
+    fig.update_layout(
+        height=900,
+        title_text=f"Interactive Diaphragm EMG Recording Inspection - {results.animal_id} {results.session_id}",
+        hovermode="x unified",
+        template="plotly_white"
+    )
+
+    html_path = output_dir / f"{results.animal_id}_{results.session_id}_diaphragm_interactive.html"
+    fig.write_html(str(html_path), include_plotlyjs='cdn')
+    return html_path
+
 def generate_diagnostic_dashboard(results: SessionResults, output_dir: Path) -> Dict[str, Path]:
     """
     Generate diagnostic plots for visual parameter verification & data stationarity inspection.
-    Saves PNG plots to output_dir.
+    Saves PNG and interactive HTML plots to output_dir.
     """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -24,7 +130,16 @@ def generate_diagnostic_dashboard(results: SessionResults, output_dir: Path) -> 
     t_max = time[-1] if len(time) > 0 else 1.0
 
     # -------------------------------------------------------------
-    # 0. Multi-Channel Raw Overview Plot (Inspect All Channels)
+    # 0. Interactive Scrollable Diaphragm EMG HTML Dashboard
+    # -------------------------------------------------------------
+    try:
+        html_emg_path = generate_interactive_emg_html(results, output_dir)
+        generated_files['diaphragm_interactive_html'] = html_emg_path
+    except Exception as e:
+        print(f" -> Note: Interactive HTML dashboard generation warning: {e}")
+
+    # -------------------------------------------------------------
+    # 1. Multi-Channel Raw Overview Plot (Inspect All Channels)
     # -------------------------------------------------------------
     if results.analog_raw.all_channels:
         num_ch = len(results.analog_raw.all_channels)
@@ -32,7 +147,6 @@ def generate_diagnostic_dashboard(results: SessionResults, output_dir: Path) -> 
         if num_ch == 1:
             axes = [axes]
         
-        # Subsample for fast plotting if recording is long (>100k samples)
         step = max(1, len(time) // 50000)
         time_sub = time[::step]
 
@@ -53,11 +167,10 @@ def generate_diagnostic_dashboard(results: SessionResults, output_dir: Path) -> 
         generated_files['raw_all_channels'] = ch_plot_path
 
     # -------------------------------------------------------------
-    # 1. Diaphragm EMG Transformation & SNR Stationarity Plot
+    # 2. Diaphragm EMG Transformation & SNR Stationarity Plot
     # -------------------------------------------------------------
     fig, axes = plt.subplots(4, 1, figsize=(14, 11))
     
-    # Subplot 1: Full Session Raw EMG Overview (0 to T_max)
     step = max(1, len(time) // 50000)
     axes[0].plot(time[::step], results.analog_raw.emg_raw[::step], color='gray', alpha=0.7, linewidth=0.6, label='Raw EMG (Full Session)')
     axes[0].set_title(f"Diaphragm EMG Full Recording Raw Signal (0 to {t_max:.1f}s) - {results.animal_id}")
@@ -66,7 +179,6 @@ def generate_diagnostic_dashboard(results: SessionResults, output_dir: Path) -> 
     axes[0].legend(loc='upper right')
     axes[0].grid(True, linestyle=':', alpha=0.6)
 
-    # Subplot 2: Zoomed Snapshot (First 10s) Raw vs Filtered vs Envelope
     snap_win = 10.0
     mask_snap = time <= snap_win
     axes[1].plot(time[mask_snap], results.analog_raw.emg_raw[mask_snap], label='Raw EMG', alpha=0.4, color='gray')
@@ -84,7 +196,6 @@ def generate_diagnostic_dashboard(results: SessionResults, output_dir: Path) -> 
     axes[1].legend(loc='upper right')
     axes[1].grid(True, linestyle=':', alpha=0.6)
 
-    # Subplot 3: Instantaneous Respiratory Rate (Full Session)
     if len(results.emg.breath_onsets) > 1:
         axes[2].plot(results.emg.breath_onsets[1:], results.emg.instantaneous_rr, color='purple', linewidth=1.2, label='Breath Rate')
     axes[2].set_title(f"Instantaneous Respiratory Rate (Mean: {np.nanmean(results.emg.instantaneous_rr):.1f} breaths/min, Total: {len(results.emg.breath_onsets)} breaths)")
@@ -92,7 +203,6 @@ def generate_diagnostic_dashboard(results: SessionResults, output_dir: Path) -> 
     axes[2].set_xlim(0, t_max)
     axes[2].grid(True, linestyle=':', alpha=0.6)
 
-    # Subplot 4: Time-Resolved EMG SNR & RMS Stationarity (Full Session)
     if len(results.emg.snr_time_vector) > 0:
         axes[3].plot(results.emg.snr_time_vector, results.emg.snr_db, color='teal', linewidth=1.5, marker='o', markersize=3, label='EMG SNR (dB)')
         axes[3].axhline(y=10.0, color='red', linestyle='--', label='Min Quality Threshold (10 dB)')
@@ -110,11 +220,10 @@ def generate_diagnostic_dashboard(results: SessionResults, output_dir: Path) -> 
     generated_files['emg_stationarity'] = emg_plot_path
 
     # -------------------------------------------------------------
-    # 2. ECG & R-Peak Detection Diagnostic Plot
+    # 3. ECG & R-Peak Detection Diagnostic Plot
     # -------------------------------------------------------------
     fig, axes = plt.subplots(3, 1, figsize=(14, 9))
     
-    # Subplot 1: Full Session Raw ECG Overview (0 to T_max)
     axes[0].plot(time[::step], results.analog_raw.ecg_raw[::step], color='crimson', alpha=0.7, linewidth=0.6, label='Raw ECG (Full Session)')
     axes[0].set_title(f"ECG Full Recording Raw Signal (0 to {t_max:.1f}s) - {results.animal_id}")
     axes[0].set_ylabel("Voltage (mV)")
@@ -122,7 +231,6 @@ def generate_diagnostic_dashboard(results: SessionResults, output_dir: Path) -> 
     axes[0].legend(loc='upper right')
     axes[0].grid(True, linestyle=':', alpha=0.6)
 
-    # Subplot 2: Zoomed Snapshot (First 10s) Raw vs Filtered ECG & R-Peaks
     axes[1].plot(time[mask_snap], results.analog_raw.ecg_raw[mask_snap], label='Raw ECG', alpha=0.4, color='gray')
     axes[1].plot(time[mask_snap], results.ecg.filtered[mask_snap], label='Filtered ECG (5-100 Hz)', color='crimson', alpha=0.9)
     r_times = results.ecg.r_peaks
@@ -136,13 +244,12 @@ def generate_diagnostic_dashboard(results: SessionResults, output_dir: Path) -> 
     axes[1].legend(loc='upper right')
     axes[1].grid(True, linestyle=':', alpha=0.6)
 
-    # Subplot 3: Heart Rate Tachogram across Full Session
     if len(results.ecg.r_peaks) > 1:
         axes[2].plot(results.ecg.r_peaks[1:], results.ecg.instantaneous_hr, color='darkgreen', linewidth=1.2, label='Heart Rate')
         mean_hr = np.nanmean(results.ecg.instantaneous_hr)
         axes[2].set_title(f"Heart Rate Tachogram (Mean HR: {mean_hr:.1f} bpm, R-Peaks Detected: {len(results.ecg.r_peaks)}, HRV SDNN: {results.ecg.hrv_sdnn:.2f} ms)")
     else:
-        axes[2].set_title(f"Heart Rate Tachogram (No R-Peaks Detected - Verify ECG channel assignment)")
+        axes[2].set_title("Heart Rate Tachogram (No R-Peaks Detected / ECG Not Recorded)")
     axes[2].set_xlabel("Time (seconds)")
     axes[2].set_ylabel("Heart Rate (bpm)")
     axes[2].set_xlim(0, t_max)
@@ -155,7 +262,7 @@ def generate_diagnostic_dashboard(results: SessionResults, output_dir: Path) -> 
     generated_files['ecg_rpeaks'] = ecg_plot_path
 
     # -------------------------------------------------------------
-    # 3. Opto Laser & Time Sync Pulse Alignment Plot
+    # 4. Opto Laser & Time Sync Pulse Alignment Plot
     # -------------------------------------------------------------
     fig, axes = plt.subplots(2, 1, figsize=(14, 6))
     
@@ -179,7 +286,7 @@ def generate_diagnostic_dashboard(results: SessionResults, output_dir: Path) -> 
     generated_files['opto_sync'] = pulse_plot_path
 
     # -------------------------------------------------------------
-    # 4. Neuropixel Depth & Stationarity Rasters (If Ephys loaded)
+    # 5. Neuropixel Depth & Stationarity Rasters (If Ephys loaded)
     # -------------------------------------------------------------
     if results.ephys is not None and len(results.ephys.unit_ids) > 0:
         fig, ax = plt.subplots(figsize=(12, 6))
