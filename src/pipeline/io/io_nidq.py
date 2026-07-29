@@ -10,31 +10,65 @@ from ..models import AnalogData
 
 logger = logging.getLogger(__name__)
 
+def parse_nidq_meta(meta_path: Any) -> Dict[str, Any]:
+    """Parse SpikeGLX *.nidq.meta file into a key-value dictionary."""
+    meta = {}
+    if meta_path is None:
+        return meta
+    meta_path = Path(meta_path)
+    if not meta_path.exists():
+        return meta
+    with open(meta_path, 'r', encoding='utf-8', errors='ignore') as f:
+        for line in f:
+            if '=' in line:
+                k, v = line.strip().split('=', 1)
+                meta[k] = v.strip()
+    return meta
+
 def read_nidq_bin(bin_path: Path, meta_path: Optional[Path] = None,
                   num_channels: int = 8, fs: float = 10000.0,
-                  dtype: np.dtype = np.int16, gain: float = 1.0) -> AnalogData:
+                  emg_chan: int = 0, ecg_chan: int = 4,
+                  sync_chan: int = 7, opto_chan: int = 3,
+                  dtype: np.dtype = np.int16) -> AnalogData:
     """
     Read SpikeGLX NIDQ binary file (*.nidq.bin).
-    If file doesn't exist, logs warning and raises FileNotFoundError.
+    Auto-detects *.nidq.meta if meta_path is not specified.
     """
     bin_path = Path(bin_path)
     if not bin_path.exists():
         raise FileNotFoundError(f"NIDQ file not found: {bin_path}")
 
-    # Read binary
+    if meta_path is None:
+        possible_meta = bin_path.with_suffix('.meta')
+        if not possible_meta.exists():
+            possible_meta = bin_path.parent / (bin_path.stem + '.meta')
+        if possible_meta.exists():
+            meta_path = possible_meta
+
+    if meta_path and meta_path.exists():
+        meta = parse_nidq_meta(meta_path)
+        num_channels = int(meta.get('nSavedChans', num_channels))
+        fs = float(meta.get('niSampRate', fs))
+        range_max = float(meta.get('niAiRangeMax', 10.0))
+        max_int = float(meta.get('niMaxInt', 32768))
+        volts_per_count = range_max / max_int
+    else:
+        volts_per_count = 10.0 / 32768.0
+
     raw_flat = np.fromfile(bin_path, dtype=dtype)
     num_samples = len(raw_flat) // num_channels
-    data_2d = raw_flat[:num_samples * num_channels].reshape((num_samples, num_channels)).T  # shape: (num_channels, num_samples)
+    data_2d = raw_flat[:num_samples * num_channels].reshape((num_samples, num_channels)).T
 
-    # Convert to Volts (mV) using gain
-    volts_2d = data_2d.astype(np.float32) * (1.0 / gain)
+    volts_2d = data_2d.astype(np.float32) * volts_per_count
 
     time_vec = np.arange(num_samples, dtype=np.float64) / fs
 
-    emg_raw = volts_2d[0] if num_channels > 0 else np.zeros(num_samples)
-    ecg_raw = volts_2d[1] if num_channels > 1 else np.zeros(num_samples)
-    sync_raw = volts_2d[2] if num_channels > 2 else np.zeros(num_samples)
-    opto_raw = volts_2d[3] if num_channels > 3 else np.zeros(num_samples)
+    emg_raw = volts_2d[emg_chan] if emg_chan < num_channels else np.zeros(num_samples)
+    ecg_raw = volts_2d[ecg_chan] if ecg_chan < num_channels else np.zeros(num_samples)
+    sync_raw = volts_2d[sync_chan] if sync_chan < num_channels else np.zeros(num_samples)
+    opto_raw = volts_2d[opto_chan] if opto_chan < num_channels else np.zeros(num_samples)
+
+    all_chans = {ch: volts_2d[ch] for ch in range(num_channels)}
 
     return AnalogData(
         time_vector=time_vec,
@@ -42,7 +76,8 @@ def read_nidq_bin(bin_path: Path, meta_path: Optional[Path] = None,
         ecg_raw=ecg_raw,
         sync_raw=sync_raw,
         opto_raw=opto_raw,
-        fs=fs
+        fs=fs,
+        all_channels=all_chans
     )
 
 def generate_synthetic_nidq(duration_s: float = 60.0, fs: float = 10000.0) -> AnalogData:

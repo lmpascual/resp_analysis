@@ -1,0 +1,71 @@
+{
+    "timestamp": "2026-07-29T15:58:48.967025",
+    "git_commit": "b0bf8ee74a495ed265f5fce7f165d43644e55fcc (dirty)",
+    "python_version": "3.12.13 | packaged by conda-forge | (main, Mar  5 2026, 16:36:12) [MSC v.1944 64 bit (AMD64)]",
+    "platform": "win32",
+    "animal_id": "TP_Tacr1_1",
+    "session_id": "npx2_g4",
+    "raw_data_dir": "Z:\\ramirezlab\\pascual\\rec_data\\TP_Tacr1_1_npx2_g4",
+    "config": {
+        "animal_id": "TP_Tacr1_1",
+        "session_id": "npx2_g4",
+        "raw_data_dir": "Z:\\ramirezlab\\pascual\\rec_data\\TP_Tacr1_1_npx2_g4",
+        "output_dir": "output_TP_Tacr1_1",
+        "interactive_checkpoint": true,
+        "emg": {
+            "channel_index": 0,
+            "fs": 10000.0,
+            "highpass_cutoff": 300.0,
+            "lowpass_cutoff": 3000.0,
+            "notch_freq": 60.0,
+            "rectify": true,
+            "smoothing_window_ms": 50.0,
+            "peak_threshold_sd": 2.5,
+            "min_breath_duration_ms": 100.0,
+            "min_inter_breath_interval_ms": 150.0,
+            "apnea_threshold_s": 2.0
+        },
+        "ecg": {
+            "channel_index": 3,
+            "fs": 10000.0,
+            "highpass_cutoff": 5.0,
+            "lowpass_cutoff": 100.0,
+            "notch_freq": 60.0,
+            "r_peak_threshold_sd": 3.0,
+            "min_rr_interval_ms": 80.0
+        },
+        "sync_opto": {
+            "sync_channel_index": 7,
+            "opto_channel_index": 2,
+            "fs": 10000.0,
+            "pulse_threshold_v": 2.5,
+            "min_pulse_width_ms": 1.0
+        },
+        "ephys": {
+            "fs_ap": 30000.0,
+            "bin_size_ms": 20.0,
+            "depth_bin_um": 100.0,
+            "min_firing_rate_hz": 0.1
+        }
+    },
+    "execution_summary": {
+        "duration_seconds": 703.4100437505085,
+        "breaths_detected": 856,
+        "mean_respiratory_rate_bpm": 80.00294380953558,
+        "emg_mean_snr_db": 40.14756618420838,
+        "apnea_events_count": 10,
+        "r_peaks_detected": 174,
+        "mean_heart_rate_bpm": 43.884800648157686,
+        "hrv_sdnn_ms": 3821.180567017202,
+        "sync_pulses_count": 0,
+        "opto_pulses_count": 1080,
+        "neuropixel_units_count": 8,
+        "diagnostic_plots": {
+            "raw_all_channels": "output_TP_Tacr1_1\\TP_Tacr1_1_npx2_g4_raw_all_channels.png",
+            "emg_stationarity": "output_TP_Tacr1_1\\TP_Tacr1_1_npx2_g4_emg_stationarity.png",
+            "ecg_rpeaks": "output_TP_Tacr1_1\\TP_Tacr1_1_npx2_g4_ecg_rpeaks.png",
+            "opto_sync": "output_TP_Tacr1_1\\TP_Tacr1_1_npx2_g4_opto_sync.png",
+            "npx_drift": "output_TP_Tacr1_1\\TP_Tacr1_1_npx2_g4_npx_drift.png"
+        }
+    }
+}

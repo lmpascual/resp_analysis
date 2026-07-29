@@ -35,11 +35,22 @@ def run_pipeline(config: PipelineConfig, interactive: bool = True) -> Optional[S
 
     # Step 2: Load Data (NIDQ & Ephys)
     nidq_path = Path(config.raw_data_dir) / f"{config.animal_id}_{config.session_id}.nidq.bin"
+    if not nidq_path.exists():
+        bin_files = list(Path(config.raw_data_dir).glob("*.nidq.bin"))
+        if bin_files:
+            nidq_path = bin_files[0]
+
     if nidq_path.exists():
         print(f" -> Reading NIDQ binary from {nidq_path}")
-        analog_data = read_nidq_bin(nidq_path, fs=config.emg.fs)
+        analog_data = read_nidq_bin(
+            nidq_path,
+            emg_chan=config.emg.channel_index,
+            ecg_chan=config.ecg.channel_index,
+            sync_chan=config.sync_opto.sync_channel_index,
+            opto_chan=config.sync_opto.opto_channel_index
+        )
     else:
-        print(f" -> Raw NIDQ binary not found at {nidq_path}. Generating synthetic demo dataset.")
+        print(f" -> Raw NIDQ binary not found at {config.raw_data_dir}. Generating synthetic demo dataset.")
         analog_data = generate_synthetic_nidq(duration_s=60.0, fs=config.emg.fs)
 
     ephys_path = Path(config.raw_data_dir)

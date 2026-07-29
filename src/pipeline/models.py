@@ -13,6 +13,7 @@ class AnalogData:
     sync_raw: np.ndarray     # Volts / Digital
     opto_raw: np.ndarray     # Volts / Digital
     fs: float                # Hz
+    all_channels: Dict[int, np.ndarray] = field(default_factory=dict)
 
 @dataclass
 class EMGProcessed:

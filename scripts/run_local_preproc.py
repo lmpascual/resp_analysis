@@ -23,7 +23,13 @@ def main():
     parser.add_argument("--config", type=str, default=None, help="Path to pre-existing JSON config/journal for exact replication")
     parser.add_argument("--non-interactive", action="store_true", help="Run without interactive parameter prompts")
     
-    # Optional parameter flags
+    # Channel Index Flags
+    parser.add_argument("--emg-channel", type=int, default=0, help="EMG channel index (default: 0)")
+    parser.add_argument("--ecg-channel", type=int, default=3, help="ECG channel index (default: 3)")
+    parser.add_argument("--sync-channel", type=int, default=7, help="Sync channel index (default: 7)")
+    parser.add_argument("--opto-channel", type=int, default=2, help="Opto channel index (default: 2)")
+
+    # Processing Parameter Flags
     parser.add_argument("--emg-highpass", type=float, default=300.0, help="EMG highpass cutoff (Hz)")
     parser.add_argument("--emg-lowpass", type=float, default=3000.0, help="EMG lowpass cutoff (Hz)")
     parser.add_argument("--emg-window-ms", type=float, default=50.0, help="EMG smoothing window (ms)")
@@ -47,15 +53,19 @@ def main():
             raw_data_dir=Path(args.raw_dir),
             output_dir=Path(args.out_dir),
             emg=EMGConfig(
+                channel_index=args.emg_channel,
                 highpass_cutoff=args.emg_highpass,
                 lowpass_cutoff=args.emg_lowpass,
                 smoothing_window_ms=args.emg_window_ms,
                 peak_threshold_sd=args.emg_peak_sd
             ),
             ecg=ECGConfig(
+                channel_index=args.ecg_channel,
                 r_peak_threshold_sd=args.ecg_peak_sd
             ),
             sync_opto=SyncOptoConfig(
+                sync_channel_index=args.sync_channel,
+                opto_channel_index=args.opto_channel,
                 pulse_threshold_v=args.pulse_threshold
             )
         )
