@@ -14,6 +14,15 @@ def process_ecg(raw_signal: np.ndarray, time_vector: np.ndarray, config: ECGConf
     2. R-peak detection
     3. Instantaneous Heart Rate (bpm) & HRV (SDNN)
     """
+    if not config.enabled or config.channel_index < 0:
+        return ECGProcessed(
+            filtered=np.zeros_like(raw_signal),
+            r_peaks=np.array([]),
+            instantaneous_hr=np.array([]),
+            rr_intervals_ms=np.array([]),
+            hrv_sdnn=0.0
+        )
+
     fs = config.fs
     nyq = 0.5 * fs
     low = config.highpass_cutoff / nyq

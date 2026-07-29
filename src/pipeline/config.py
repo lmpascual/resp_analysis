@@ -22,7 +22,8 @@ class EMGConfig:
 
 @dataclass
 class ECGConfig:
-    channel_index: int = 1
+    enabled: bool = True
+    channel_index: int = 1  # Default to channel 1 (XA1;1)
     fs: float = 10000.0  # Hz
     highpass_cutoff: float = 5.0  # Hz
     lowpass_cutoff: float = 100.0  # Hz

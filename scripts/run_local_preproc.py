@@ -25,7 +25,8 @@ def main():
     
     # Channel Index Flags
     parser.add_argument("--emg-channel", type=int, default=0, help="EMG channel index (default: 0)")
-    parser.add_argument("--ecg-channel", type=int, default=3, help="ECG channel index (default: 3)")
+    parser.add_argument("--ecg-channel", type=int, default=1, help="ECG channel index (default: 1 for xa1;1)")
+    parser.add_argument("--no-ecg", action="store_true", help="Disable ECG processing if no ECG was recorded")
     parser.add_argument("--sync-channel", type=int, default=7, help="Sync channel index (default: 7)")
     parser.add_argument("--opto-channel", type=int, default=2, help="Opto channel index (default: 2)")
 
@@ -47,6 +48,7 @@ def main():
                 cfg_dict = cfg_dict["config"]
         config = PipelineConfig.from_dict(cfg_dict)
     else:
+        ecg_enabled = not args.no_ecg
         config = PipelineConfig(
             animal_id=args.animal_id,
             session_id=args.session_id,
@@ -60,6 +62,7 @@ def main():
                 peak_threshold_sd=args.emg_peak_sd
             ),
             ecg=ECGConfig(
+                enabled=ecg_enabled,
                 channel_index=args.ecg_channel,
                 r_peak_threshold_sd=args.ecg_peak_sd
             ),

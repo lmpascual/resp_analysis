@@ -39,8 +39,11 @@ def checkpoint_approve_parameters(config: PipelineConfig, interactive: bool = Tr
     print(f"    Passband: {config.emg.highpass_cutoff} Hz - {config.emg.lowpass_cutoff} Hz | Notch: {config.emg.notch_freq} Hz")
     print(f"    Smoothing Window: {config.emg.smoothing_window_ms} ms | Peak Threshold: {config.emg.peak_threshold_sd} SD")
     print(f"    Apnea Threshold: {config.emg.apnea_threshold_s} s")
-    print(f" - ECG Channel Index: {config.ecg.channel_index} | Fs: {config.ecg.fs} Hz")
-    print(f"    Passband: {config.ecg.highpass_cutoff} Hz - {config.ecg.lowpass_cutoff} Hz | R-Peak Threshold: {config.ecg.r_peak_threshold_sd} SD")
+    if config.ecg.enabled:
+        print(f" - ECG Channel Index: {config.ecg.channel_index} | Fs: {config.ecg.fs} Hz")
+        print(f"    Passband: {config.ecg.highpass_cutoff} Hz - {config.ecg.lowpass_cutoff} Hz | R-Peak Threshold: {config.ecg.r_peak_threshold_sd} SD")
+    else:
+        print(f" - ECG Channel Index: Disabled / Not Recorded")
     print(f" - Sync Channel Index: {config.sync_opto.sync_channel_index} | Opto Channel Index: {config.sync_opto.opto_channel_index}")
     print(f"    Pulse TTL Threshold: {config.sync_opto.pulse_threshold_v} V")
     print(f" - Neuropixel AP Fs: {config.ephys.fs_ap} Hz | PSTH Bin: {config.ephys.bin_size_ms} ms")

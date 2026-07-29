@@ -1,9 +1,9 @@
 # Analysis Provenance & Reproduction Journal
 
-- **Timestamp**: `2026-07-29T15:58:48.967025`
+- **Timestamp**: `2026-07-29T16:05:50.959939`
 - **Subject**: `TP_Tacr1_1`
 - **Session**: `npx2_g4`
-- **Git Commit**: `b0bf8ee74a495ed265f5fce7f165d43644e55fcc (dirty)`
+- **Git Commit**: `169280496dbfa9e94bd44e64f9ba9abb6bb99c6c (dirty)`
 - **Python Version**: `3.12.13`
 - **Raw Data Directory**: `Z:\ramirezlab\pascual\rec_data\TP_Tacr1_1_npx2_g4`
 
@@ -21,7 +21,7 @@
 - **Apnea Threshold**: `2.0 s`
 
 ### ECG Processing
-- **Channel Index**: `3`
+- **Channel Index**: `1`
 - **Sampling Frequency**: `10000.0 Hz`
 - **Bandpass Filter**: `5.0 Hz` to `100.0 Hz` (Notch `60.0 Hz`)
 - **R-Peak Threshold**: `3.0 SD`
@@ -42,9 +42,9 @@
   "mean_respiratory_rate_bpm": 80.00294380953558,
   "emg_mean_snr_db": 40.14756618420838,
   "apnea_events_count": 10,
-  "r_peaks_detected": 174,
-  "mean_heart_rate_bpm": 43.884800648157686,
-  "hrv_sdnn_ms": 3821.180567017202,
+  "r_peaks_detected": 0,
+  "mean_heart_rate_bpm": 0.0,
+  "hrv_sdnn_ms": 0.0,
   "sync_pulses_count": 0,
   "opto_pulses_count": 1080,
   "neuropixel_units_count": 8,
