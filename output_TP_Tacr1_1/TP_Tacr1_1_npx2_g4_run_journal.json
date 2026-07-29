@@ -1,6 +1,6 @@
 {
-    "timestamp": "2026-07-29T16:05:50.959939",
-    "git_commit": "169280496dbfa9e94bd44e64f9ba9abb6bb99c6c (dirty)",
+    "timestamp": "2026-07-29T16:15:06.509297",
+    "git_commit": "df4f4604aa86a3862cfb3b984f4113f401cb6d47 (dirty)",
     "python_version": "3.12.13 | packaged by conda-forge | (main, Mar  5 2026, 16:36:12) [MSC v.1944 64 bit (AMD64)]",
     "platform": "win32",
     "animal_id": "TP_Tacr1_1",
@@ -37,7 +37,7 @@
         },
         "sync_opto": {
             "sync_channel_index": 7,
-            "opto_channel_index": 2,
+            "opto_channel_index": 6,
             "fs": 10000.0,
             "pulse_threshold_v": 2.5,
             "min_pulse_width_ms": 1.0
@@ -59,7 +59,7 @@
         "mean_heart_rate_bpm": 0.0,
         "hrv_sdnn_ms": 0.0,
         "sync_pulses_count": 0,
-        "opto_pulses_count": 1080,
+        "opto_pulses_count": 0,
         "neuropixel_units_count": 8,
         "diagnostic_plots": {
             "raw_all_channels": "output_TP_Tacr1_1\\TP_Tacr1_1_npx2_g4_raw_all_channels.png",

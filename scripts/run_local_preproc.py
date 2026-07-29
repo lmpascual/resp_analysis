@@ -24,11 +24,11 @@ def main():
     parser.add_argument("--non-interactive", action="store_true", help="Run without interactive parameter prompts")
     
     # Channel Index Flags
-    parser.add_argument("--emg-channel", type=int, default=0, help="EMG channel index (default: 0)")
+    parser.add_argument("--emg-channel", type=int, default=0, help="EMG channel index (default: 0 for xa0;0)")
     parser.add_argument("--ecg-channel", type=int, default=1, help="ECG channel index (default: 1 for xa1;1)")
     parser.add_argument("--no-ecg", action="store_true", help="Disable ECG processing if no ECG was recorded")
-    parser.add_argument("--sync-channel", type=int, default=7, help="Sync channel index (default: 7)")
-    parser.add_argument("--opto-channel", type=int, default=2, help="Opto channel index (default: 2)")
+    parser.add_argument("--sync-channel", type=int, default=7, help="Sync channel index (default: 7 for syncNiChan)")
+    parser.add_argument("--opto-channel", type=int, default=6, help="Opto channel index (default: 6 for xa6;6)")
 
     # Processing Parameter Flags
     parser.add_argument("--emg-highpass", type=float, default=300.0, help="EMG highpass cutoff (Hz)")

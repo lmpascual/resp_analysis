@@ -1,9 +1,9 @@
 # Analysis Provenance & Reproduction Journal
 
-- **Timestamp**: `2026-07-29T16:05:50.959939`
+- **Timestamp**: `2026-07-29T16:15:06.509297`
 - **Subject**: `TP_Tacr1_1`
 - **Session**: `npx2_g4`
-- **Git Commit**: `169280496dbfa9e94bd44e64f9ba9abb6bb99c6c (dirty)`
+- **Git Commit**: `df4f4604aa86a3862cfb3b984f4113f401cb6d47 (dirty)`
 - **Python Version**: `3.12.13`
 - **Raw Data Directory**: `Z:\ramirezlab\pascual\rec_data\TP_Tacr1_1_npx2_g4`
 
@@ -28,7 +28,7 @@
 
 ### Opto Laser & Time Sync
 - **Sync Channel Index**: `7`
-- **Opto Laser Channel Index**: `2`
+- **Opto Laser Channel Index**: `6`
 - **Pulse Threshold**: `2.5 V`
 
 ---
@@ -46,7 +46,7 @@
   "mean_heart_rate_bpm": 0.0,
   "hrv_sdnn_ms": 0.0,
   "sync_pulses_count": 0,
-  "opto_pulses_count": 1080,
+  "opto_pulses_count": 0,
   "neuropixel_units_count": 8,
   "diagnostic_plots": {
     "raw_all_channels": "output_TP_Tacr1_1\\TP_Tacr1_1_npx2_g4_raw_all_channels.png",

@@ -33,8 +33,8 @@ class ECGConfig:
 
 @dataclass
 class SyncOptoConfig:
-    sync_channel_index: int = 2
-    opto_channel_index: int = 3
+    sync_channel_index: int = 7  # Default sync channel index (XA7;7)
+    opto_channel_index: int = 6  # Default opto laser channel index (XA6;6)
     fs: float = 10000.0  # Hz
     pulse_threshold_v: float = 2.5  # Volts for digital TTL detection
     min_pulse_width_ms: float = 1.0  # ms
