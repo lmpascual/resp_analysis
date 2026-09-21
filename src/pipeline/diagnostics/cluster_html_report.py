@@ -7,7 +7,7 @@ Builds a modern, responsive, Phy-like browser validation suite featuring:
 3. Stationarity Suite: Spike amplitude drift vs time and time-resolved ISI PDF ridge lines.
 4. Respiratory Phase Vector: Circular polar rose plot, mean vector (r, theta), Rayleigh test.
 5. Literature Quality Controls: Autocorrelogram (ACG), template waveform kinetics, and amplitude cutoff fit.
-6. Unified multi-unit browser with dropdown selector, filters, and keyboard navigation ([J/K], [Left/Right]).
+6. Ultra-lightweight multi-unit browser shell (<50 KB) with iframe navigation and keyboard shortcuts ([J/K], [Left/Right]).
 """
 
 import json
@@ -36,7 +36,7 @@ def build_unit_validation_figure(bundle: UnitValidationBundle) -> go.Figure:
             [{"type": "xy"}, {"type": "xy"}]              # Row 4: Autocorrelogram & Template Waveforms
         ],
         subplot_titles=(
-            f"<b>1. Multi-Channel Filtered Footprint Traces (300-6000 Hz)</b> & Detected Spikes (Red Markers in Troughs on Peak Ch {bundle.peak_channel})",
+            f"<b>1. Multi-Channel Filtered Footprint Traces (300-6000 Hz)</b> & Detected Spikes (Red Markers on Peak Ch {bundle.peak_channel})",
             f"<b>2. ISI Distribution</b> (Refractory Threshold: 1.5 ms)",
             f"<b>4. Respiratory Phase Rose Plot & Vector</b> ({bundle.respiratory_phase.landmark_provenance})",
             f"<b>3A. Amplitude Stationarity Over Session</b> (Drift: {bundle.stationarity.drift_slope_uv_per_min} uV/min)",
@@ -453,24 +453,24 @@ def generate_single_unit_html(bundle: UnitValidationBundle, output_path: Path) -
 
 def generate_multi_cluster_browser_html(
     bundles: List[UnitValidationBundle],
-    output_path: Path
+    output_path: Path,
+    units_rel_dir: str = "units"
 ) -> Path:
     """
-    Renders a unified multi-cluster browser HTML with an interactive dropdown selector,
-    instant keyboard navigation, and fast rendering.
+    Renders an ultra-lightweight (<50 KB) multi-cluster browser shell that dynamically
+    loads individual unit reports inside an iframe. Zero memory bloat, instant opening,
+    no risk of OOM in IDE or browser.
     """
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    unit_payloads = []
+    units_manifest = []
     for b in bundles:
-        fig = build_unit_validation_figure(b)
-        fig_div = fig.to_html(include_plotlyjs=False, full_html=False)
         rp = b.respiratory_phase
         isi = b.isi
         wf = b.waveform
-
-        unit_payloads.append({
+        unit_file_name = f"unit_{b.cluster_id:04d}_ch{b.peak_channel}.html"
+        units_manifest.append({
             "cluster_id": b.cluster_id,
             "firing_rate_hz": b.firing_rate_hz,
             "total_spikes": b.total_spikes,
@@ -488,10 +488,10 @@ def generate_multi_cluster_browser_html(
             "subtype_class": rp.subtype_class,
             "trough_to_peak_us": wf.trough_to_peak_us,
             "cell_type": wf.putative_cell_type.split()[0],
-            "fig_html": fig_div
+            "file_url": f"{units_rel_dir}/{unit_file_name}"
         })
 
-    units_json = json.dumps(unit_payloads)
+    manifest_json = json.dumps(units_manifest)
 
     html_content = f"""<!DOCTYPE html>
 <html lang="en">
@@ -499,22 +499,21 @@ def generate_multi_cluster_browser_html(
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Phy-Like Multi-Cluster Validation Browser</title>
-    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
     <style>
         body {{
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
             background-color: #0f172a;
             color: #f8fafc;
             margin: 0;
-            padding: 20px;
+            padding: 16px;
         }}
-        .browser-card {{
-            max-width: 1440px;
+        .browser-container {{
+            max-width: 1480px;
             margin: 0 auto;
             background: #1e293b;
             border-radius: 12px;
-            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3);
-            padding: 20px 28px;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.4);
+            padding: 18px 24px;
             border: 1px solid #334155;
         }}
         .top-bar {{
@@ -523,14 +522,14 @@ def generate_multi_cluster_browser_html(
             justify-content: space-between;
             align-items: center;
             border-bottom: 1px solid #334155;
-            padding-bottom: 16px;
-            margin-bottom: 16px;
+            padding-bottom: 14px;
+            margin-bottom: 14px;
             gap: 12px;
         }}
         .selector-controls {{
             display: flex;
             align-items: center;
-            gap: 10px;
+            gap: 8px;
         }}
         select {{
             background: #0f172a;
@@ -541,6 +540,7 @@ def generate_multi_cluster_browser_html(
             font-size: 0.95rem;
             outline: none;
             cursor: pointer;
+            min-width: 380px;
         }}
         button {{
             background: #3b82f6;
@@ -563,56 +563,28 @@ def generate_multi_cluster_browser_html(
         .filter-btn.active {{
             background: #0284c7;
         }}
-        .metrics-card {{
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-            gap: 12px;
-            background: #0f172a;
-            padding: 14px 18px;
+        .iframe-wrapper {{
+            width: 100%;
+            height: 1600px;
             border-radius: 8px;
-            border: 1px solid #334155;
-            margin-bottom: 16px;
-        }}
-        .metric-item {{
-            display: flex;
-            flex-direction: column;
-        }}
-        .metric-label {{
-            font-size: 0.72rem;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-            color: #94a3b8;
-            font-weight: 600;
-        }}
-        .metric-val {{
-            font-size: 1.1rem;
-            font-weight: 700;
-            color: #f8fafc;
-            margin-top: 4px;
-        }}
-        .provenance-banner {{
-            background: #0c4a6e;
-            border-left: 4px solid #38bdf8;
-            padding: 8px 14px;
-            border-radius: 4px;
-            margin-bottom: 16px;
-            font-size: 0.85rem;
-            color: #bae6fd;
-        }}
-        #plot-container {{
+            overflow: hidden;
             background: #ffffff;
-            border-radius: 8px;
-            padding: 10px;
+            box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.1);
+        }}
+        iframe {{
+            width: 100%;
+            height: 100%;
+            border: none;
         }}
     </style>
 </head>
 <body>
-    <div class="browser-card">
+    <div class="browser-container">
         <div class="top-bar">
             <div>
-                <h2 style="margin:0;font-size:1.4rem;">Phy-Like Cluster Validation Browser</h2>
+                <h2 style="margin:0;font-size:1.35rem;color:#38bdf8;">Phy-Like Cluster Validation Browser</h2>
                 <div style="color:#94a3b8;font-size:0.85rem;margin-top:4px;">
-                    Use dropdown or keys <strong>[J/K]</strong> or <strong>[&larr;/&rarr;]</strong> to switch clusters.
+                    Fast on-demand navigation &bull; Keys: <strong>[J/K]</strong> or <strong>[&larr;/&rarr;]</strong>
                 </div>
             </div>
 
@@ -631,46 +603,13 @@ def generate_multi_cluster_browser_html(
             </div>
         </div>
 
-        <div class="provenance-banner" id="provBanner">
-            <strong>Respiratory Landmark Provenance:</strong> <span id="provText">Loading...</span>
+        <div class="iframe-wrapper">
+            <iframe id="viewerFrame" src="" title="Single Unit Validator"></iframe>
         </div>
-
-        <div class="metrics-card">
-            <div class="metric-item">
-                <span class="metric-label">Unit / Location</span>
-                <span class="metric-val" id="mUnitLoc">--</span>
-            </div>
-            <div class="metric-item">
-                <span class="metric-label">Allen QC Status</span>
-                <span class="metric-val" id="mQC">--</span>
-            </div>
-            <div class="metric-item">
-                <span class="metric-label">Firing Rate / Spikes</span>
-                <span class="metric-val" id="mFR">--</span>
-            </div>
-            <div class="metric-item">
-                <span class="metric-label">Estimated SNR</span>
-                <span class="metric-val" id="mSNR">--</span>
-            </div>
-            <div class="metric-item">
-                <span class="metric-label">ISI Violations (Q)</span>
-                <span class="metric-val" id="mISI">--</span>
-            </div>
-            <div class="metric-item">
-                <span class="metric-label">Phase Vector (R, &phi;)</span>
-                <span class="metric-val" id="mPhase">--</span>
-            </div>
-            <div class="metric-item">
-                <span class="metric-label">AP Trough-to-Peak</span>
-                <span class="metric-val" id="mKinetics">--</span>
-            </div>
-        </div>
-
-        <div id="plot-container"></div>
     </div>
 
     <script>
-        const unitsData = {units_json};
+        const unitsManifest = {manifest_json};
         let currentFilter = 'all';
         let filteredIndices = [];
         let currentIndex = 0;
@@ -680,7 +619,7 @@ def generate_multi_cluster_browser_html(
             sel.innerHTML = '';
             filteredIndices = [];
 
-            unitsData.forEach((u, idx) => {{
+            unitsManifest.forEach((u, idx) => {{
                 let matches = true;
                 if (currentFilter === 'qc' && !u.passed_allen_qc) matches = false;
                 if (currentFilter === 'insp' && u.functional_class !== 'Inspiratory') matches = false;
@@ -691,58 +630,40 @@ def generate_multi_cluster_browser_html(
                     filteredIndices.push(idx);
                     const opt = document.createElement('option');
                     opt.value = idx;
-                    opt.textContent = `Unit ${{String(u.cluster_id).padStart(4, '0')}} | Ch ${{u.peak_channel}} (${{u.depth_um.toFixed(0)}}um) | ${{u.firing_rate_hz.toFixed(1)}}Hz | ${{u.subtype_class}}`;
+                    opt.textContent = `Unit ${{String(u.cluster_id).padStart(4, '0')}} | Peak Ch ${{u.peak_channel}} (${{u.depth_um.toFixed(0)}}um) | ${{u.firing_rate_hz.toFixed(1)}}Hz | ${{u.subtype_class}}`;
                     sel.appendChild(opt);
                 }}
             }});
 
             if (filteredIndices.length > 0) {{
-                renderUnit(filteredIndices[0]);
+                loadUnit(filteredIndices[0]);
             }} else {{
-                document.getElementById('plot-container').innerHTML = '<div style="padding:40px;text-align:center;color:#64748b;">No units match the selected filter.</div>';
+                document.getElementById('viewerFrame').srcdoc = '<div style="padding:40px;text-align:center;font-family:sans-serif;color:#64748b;">No units match the selected filter.</div>';
             }}
         }}
 
-        function renderUnit(index) {{
+        function loadUnit(index) {{
             currentIndex = index;
-            const u = unitsData[index];
+            const u = unitsManifest[index];
             document.getElementById('unitSelect').value = index;
-
-            document.getElementById('provText').textContent = `${{u.landmark_provenance}} (0 deg Insp Onset -> 180 deg Exp Onset)`;
-            document.getElementById('mUnitLoc').textContent = `Unit ${{u.cluster_id}} (Ch ${{u.peak_channel}}, ${{u.depth_um.toFixed(0)}}um)`;
-            document.getElementById('mQC').innerHTML = u.passed_allen_qc ? 
-                '<span style="color:#10b981;">PASS (Good)</span>' : 
-                '<span style="color:#ef4444;">FAIL (Flagged)</span>';
-            document.getElementById('mFR').textContent = `${{u.firing_rate_hz.toFixed(2)}} Hz (${{u.total_spikes.toLocaleString()}} spk)`;
-            document.getElementById('mSNR').textContent = `${{u.snr.toFixed(2)}}`;
-            document.getElementById('mISI').innerHTML = `<span style="color:${{u.isi_q <= 0.5 ? '#10b981' : '#ef4444'}}">${{u.isi_q.toFixed(3)}} (${{u.isi_pct.toFixed(1)}}%)</span>`;
-            document.getElementById('mPhase').textContent = `R=${{u.phase_r.toFixed(3)}} | ${{u.phase_deg.toFixed(1)}} deg (${{u.subtype_class}})`;
-            document.getElementById('mKinetics').textContent = `${{u.trough_to_peak_us.toFixed(0)}} us (${{u.cell_type}})`;
-
-            const container = document.getElementById('plot-container');
-            container.innerHTML = u.fig_html;
-
-            const scripts = container.getElementsByTagName('script');
-            for (let i = 0; i < scripts.length; i++) {{
-                eval(scripts[i].innerText);
-            }}
+            document.getElementById('viewerFrame').src = u.file_url;
         }}
 
         function onSelectUnit(idx) {{
-            renderUnit(parseInt(idx));
+            loadUnit(parseInt(idx));
         }}
 
         function prevUnit() {{
             const currentPos = filteredIndices.indexOf(currentIndex);
             if (currentPos > 0) {{
-                renderUnit(filteredIndices[currentPos - 1]);
+                loadUnit(filteredIndices[currentPos - 1]);
             }}
         }}
 
         function nextUnit() {{
             const currentPos = filteredIndices.indexOf(currentIndex);
             if (currentPos >= 0 && currentPos < filteredIndices.length - 1) {{
-                renderUnit(filteredIndices[currentPos + 1]);
+                loadUnit(filteredIndices[currentPos + 1]);
             }}
         }}
 
