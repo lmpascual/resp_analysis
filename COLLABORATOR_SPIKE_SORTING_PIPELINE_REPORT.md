@@ -76,8 +76,12 @@ Every parameter in the pipeline is explicit, inspectable, and overrideable via i
 | :--- | :--- | :--- | :--- |
 | `fs_ap` | `30000.0` | Hz | Standard SpikeGLX Neuropixels 1.0/2.0 AP sampling rate. |
 | `fs_nidq` | `10000.0` | Hz | Sufficient to resolve high-frequency diaphragm EMG motor units and sub-millisecond opto TTL edges. |
-| `reader_backend` | `raw_mmap` | Memory Map | Bypasses Neo stream enumeration errors when NIDAQ and IMEC probe streams co-occur in the same folder. |
+| `reader_backend` | `raw_mmap` | Memory Map | Directly targets and memory-maps `.ap.bin` and `.nidq.bin` streams independently. Bypasses Neo multi-stream crashes when 30 kHz probe and 10 kHz analog files co-occur in the same folder. |
 | `data_dtype` | `int16` | Dtype | Memory-mapped access prevents RAM saturation during multi-channel processing. |
+
+> [!NOTE]
+> **Why `raw_mmap` instead of default Neo stream reading?**
+> SpikeGLX stores both 30 kHz Neuropixels AP probe streams and 10 kHz NIDAQ analog streams (diaphragm EMG, plethysmography, ECG, opto TTLs) in the same recording folder. Standard SpikeInterface / Neo loaders often crash with stream enumeration/ambiguity errors when two different sampling rates co-occur in one folder. The `raw_mmap` backend directly parses the `.meta` text headers and memory-maps each binary stream independently from disk via `np.memmap`. This eliminates stream ambiguity crashes and enables instant random access to any time window with near-zero RAM overhead, even on >20 GB recordings.
 
 ### Stage 2: Signal Conditioning & Preprocessing (`CatGT`)
 | Parameter | Default Value | Unit / Format | Engineering Rationale & Failure Mode Avoidance |
