@@ -69,11 +69,16 @@ class AmplitudeStationarityResult:
 
 
 @dataclass
-class TimeResolvedISIPDFResult:
+class TimeResolvedISICDFResult:
     epoch_labels: List[str]
     epoch_time_ranges: List[Tuple[float, float]]
-    pdf_x_ms: np.ndarray
-    epoch_pdfs: List[np.ndarray]
+    epoch_isis_ms: List[np.ndarray]
+    epoch_cdfs: List[np.ndarray]
+    ks_drift_p_values: List[float]
+    pdf_x_ms: Optional[np.ndarray] = None
+    epoch_pdfs: Optional[List[np.ndarray]] = None
+
+TimeResolvedISIPDFResult = TimeResolvedISICDFResult
 
 
 @dataclass
@@ -436,21 +441,25 @@ def compute_amplitude_stationarity(
     )
 
 
-def compute_time_resolved_isi_pdfs(
+def compute_time_resolved_isi_cdfs(
     spike_times_s: np.ndarray,
     n_epochs: int = 5,
-    max_isi_ms: float = 100.0,
-    n_points: int = 200
-) -> TimeResolvedISIPDFResult:
+    max_points_per_epoch: int = 1000,
+    **kwargs
+) -> TimeResolvedISICDFResult:
     """
-    Computes multi-epoch ISI probability density functions (PDF ridge lines).
+    Computes multi-epoch unsmoothed empirical cumulative distribution functions (ECDFs).
+    Supports logarithmic scaling across multiple decades (from <1 ms to >10 s) to capture
+    both rapid refractory burst doublets and long inter-breath pauses without smoothing distortion.
     """
-    x_grid = np.linspace(0.5, max_isi_ms, n_points)
     if len(spike_times_s) < 10:
-        return TimeResolvedISIPDFResult(
+        return TimeResolvedISICDFResult(
             epoch_labels=[],
             epoch_time_ranges=[],
-            pdf_x_ms=x_grid,
+            epoch_isis_ms=[],
+            epoch_cdfs=[],
+            ks_drift_p_values=[],
+            pdf_x_ms=np.array([]),
             epoch_pdfs=[]
         )
 
@@ -460,7 +469,10 @@ def compute_time_resolved_isi_pdfs(
 
     labels = []
     ranges = []
-    pdfs = []
+    epoch_isis = []
+    epoch_cdfs = []
+    ks_pvals = []
+    ep1_raw_isis = None
 
     for ep in range(n_epochs):
         t0, t1 = epoch_edges[ep], epoch_edges[ep + 1]
@@ -471,27 +483,52 @@ def compute_time_resolved_isi_pdfs(
 
         if len(spks_ep) >= 5:
             isis_ms = np.diff(np.sort(spks_ep)) * 1000.0
-            isis_valid = isis_ms[(isis_ms > 0) & (isis_ms <= max_isi_ms)]
-            if len(isis_valid) >= 5:
-                try:
-                    kde = stats.gaussian_kde(isis_valid, bw_method=0.25)
-                    pdf_y = kde.evaluate(x_grid)
-                except Exception:
-                    cnts, _ = np.histogram(isis_valid, bins=np.linspace(0, max_isi_ms, n_points + 1), density=True)
-                    pdf_y = cnts
+            valid_isis = np.sort(isis_ms[isis_ms > 0])
+            n_pts = len(valid_isis)
+            if n_pts >= 2:
+                raw_y = np.arange(1, n_pts + 1, dtype=np.float64) / float(n_pts)
+                if n_pts > max_points_per_epoch:
+                    sub_idx = np.round(np.linspace(0, n_pts - 1, max_points_per_epoch)).astype(int)
+                    sub_x = valid_isis[sub_idx]
+                    sub_y = raw_y[sub_idx]
+                else:
+                    sub_x = valid_isis
+                    sub_y = raw_y
+
+                epoch_isis.append(sub_x)
+                epoch_cdfs.append(sub_y)
+
+                if ep == 0:
+                    ep1_raw_isis = valid_isis
+                    ks_pvals.append(1.0)
+                else:
+                    if ep1_raw_isis is not None and len(ep1_raw_isis) >= 5:
+                        _, p_val = stats.ks_2samp(ep1_raw_isis, valid_isis)
+                        ks_pvals.append(float(p_val))
+                    else:
+                        ks_pvals.append(1.0)
             else:
-                pdf_y = np.zeros_like(x_grid)
+                epoch_isis.append(np.array([]))
+                epoch_cdfs.append(np.array([]))
+                ks_pvals.append(1.0)
         else:
-            pdf_y = np.zeros_like(x_grid)
+            epoch_isis.append(np.array([]))
+            epoch_cdfs.append(np.array([]))
+            ks_pvals.append(1.0)
 
-        pdfs.append(pdf_y)
-
-    return TimeResolvedISIPDFResult(
+    first_isis = epoch_isis[0] if len(epoch_isis) > 0 else np.array([])
+    return TimeResolvedISICDFResult(
         epoch_labels=labels,
         epoch_time_ranges=ranges,
-        pdf_x_ms=x_grid,
-        epoch_pdfs=pdfs
+        epoch_isis_ms=epoch_isis,
+        epoch_cdfs=epoch_cdfs,
+        ks_drift_p_values=ks_pvals,
+        pdf_x_ms=first_isis,
+        epoch_pdfs=epoch_cdfs
     )
+
+
+compute_time_resolved_isi_pdfs = compute_time_resolved_isi_cdfs
 
 
 def compute_autocorrelogram(

@@ -102,9 +102,13 @@ def test_amplitude_stationarity_and_pdfs():
     assert abs(st.drift_slope_uv_per_min) < 15.0
     assert 90.0 < np.mean(st.median_amplitudes_uv) < 110.0
 
-    pdfs = compute_time_resolved_isi_pdfs(times, n_epochs=5)
-    assert len(pdfs.epoch_labels) == 5
-    assert len(pdfs.epoch_pdfs) == 5
+    cdfs = compute_time_resolved_isi_pdfs(times, n_epochs=5)
+    assert len(cdfs.epoch_labels) == 5
+    assert len(cdfs.epoch_cdfs) == 5
+    assert len(cdfs.epoch_isis_ms) == 5
+    assert len(cdfs.ks_drift_p_values) == 5
+    assert cdfs.epoch_cdfs[0][-1] == 1.0
+    assert cdfs.ks_drift_p_values[0] == 1.0
 
 
 def test_autocorrelogram_and_cutoff():

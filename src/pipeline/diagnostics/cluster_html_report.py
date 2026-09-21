@@ -40,7 +40,7 @@ def build_unit_validation_figure(bundle: UnitValidationBundle) -> go.Figure:
             f"<b>2. ISI Distribution</b> (Refractory Threshold: 1.5 ms)",
             f"<b>4. Respiratory Phase Rose Plot & Vector</b> ({bundle.respiratory_phase.landmark_provenance})",
             f"<b>3A. Amplitude Stationarity Over Session</b> (Drift: {bundle.stationarity.drift_slope_uv_per_min} uV/min)",
-            f"<b>3B. Time-Resolved ISI PDF Lines</b> (5 Temporal Epochs)",
+            f"<b>3B. Time-Resolved Unsmoothed ISI CDFs</b> (5 Epochs, Log Scale)",
             f"<b>5A. Autocorrelogram (ACG)</b> (Dip Ratio: {bundle.acg.refractory_dip_ratio})",
             f"<b>5B. Footprint Template Waveforms</b> ({bundle.waveform.putative_cell_type})"
         ),
@@ -235,24 +235,67 @@ def build_unit_validation_figure(bundle: UnitValidationBundle) -> go.Figure:
     fig.update_yaxes(title_text="Amplitude (uV)", row=3, col=1)
 
     # -------------------------------------------------------------
-    # Row 3, Col 2: Time-Resolved ISI PDF Lines
+    # Row 3, Col 2: Time-Resolved Unsmoothed ISI CDFs (Log Scale)
     # -------------------------------------------------------------
     tr_isi = bundle.time_resolved_isi
     palette = ["#2563eb", "#06b6d4", "#10b981", "#f59e0b", "#ef4444"]
-    for ep_idx, (lbl, pdf) in enumerate(zip(tr_isi.epoch_labels, tr_isi.epoch_pdfs)):
-        c_code = palette[ep_idx % len(palette)]
+    has_cdf = hasattr(tr_isi, "epoch_cdfs") and len(tr_isi.epoch_cdfs) > 0 and len(tr_isi.epoch_isis_ms) > 0
+    
+    if has_cdf:
+        for ep_idx, (lbl, isis_ep, cdf_ep) in enumerate(zip(tr_isi.epoch_labels, tr_isi.epoch_isis_ms, tr_isi.epoch_cdfs)):
+            if len(isis_ep) == 0:
+                continue
+            c_code = palette[ep_idx % len(palette)]
+            ks_val = tr_isi.ks_drift_p_values[ep_idx] if hasattr(tr_isi, "ks_drift_p_values") and ep_idx < len(tr_isi.ks_drift_p_values) else 1.0
+            ks_text = f" (KS p={ks_val:.2f})" if ep_idx > 0 else " (Ref)"
+            fig.add_trace(
+                go.Scatter(
+                    x=isis_ep,
+                    y=cdf_ep,
+                    mode="lines",
+                    line_shape="hv",  # Exact unsmoothed empirical step CDF
+                    name=f"{lbl}{ks_text}",
+                    line=dict(color=c_code, width=2.0),
+                    hovertemplate=f"<b>{lbl}</b><br>ISI: %{{x:.2f}} ms<br>Cumulative: %{{y:.3f}}<extra></extra>"
+                ),
+                row=3, col=2
+            )
+            
         fig.add_trace(
             go.Scatter(
-                x=tr_isi.pdf_x_ms,
-                y=pdf,
+                x=[1.5, 1.5], y=[0.0, 1.0],
                 mode="lines",
-                name=lbl,
-                line=dict(color=c_code, width=2.0)
+                line=dict(color="#ef4444", dash="dash", width=1.5),
+                name="1.5ms Refractory Threshold",
+                hoverinfo="name"
             ),
             row=3, col=2
         )
-    fig.update_xaxes(title_text="Inter-Spike Interval (ms)", range=[0, 60], row=3, col=2)
-    fig.update_yaxes(title_text="Probability Density", row=3, col=2)
+        fig.update_xaxes(
+            type="log",
+            title_text="Inter-Spike Interval (ms, log scale)",
+            row=3, col=2
+        )
+        fig.update_yaxes(
+            title_text="Cumulative Probability (ECDF)",
+            range=[0.0, 1.05],
+            row=3, col=2
+        )
+    else:
+        for ep_idx, (lbl, pdf) in enumerate(zip(tr_isi.epoch_labels, tr_isi.epoch_pdfs)):
+            c_code = palette[ep_idx % len(palette)]
+            fig.add_trace(
+                go.Scatter(
+                    x=tr_isi.pdf_x_ms,
+                    y=pdf,
+                    mode="lines",
+                    name=lbl,
+                    line=dict(color=c_code, width=2.0)
+                ),
+                row=3, col=2
+            )
+        fig.update_xaxes(title_text="Inter-Spike Interval (ms)", range=[0, 60], row=3, col=2)
+        fig.update_yaxes(title_text="Probability Density", row=3, col=2)
 
     # -------------------------------------------------------------
     # Row 4, Col 1: Autocorrelogram (ACG)
