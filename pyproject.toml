@@ -3,9 +3,9 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "analysis-src"
+name = "resp-analysis"
 version = "0.1.0"
-description = "Modular Neurophysiology & Cardiorespiratory Analysis Pipeline"
+description = "Modular Respiratory Neurophysiology & Spike Sorting Analysis Pipeline"
 authors = [
     { name = "Leila Pascual", email = "pascual@example.com" }
 ]
@@ -20,4 +20,4 @@ dependencies = [
 ]
 
 [project.scripts]
-run-pipeline = "scripts.run_local_preproc:cli"
+run-pipeline = "scripts.pipeline.run_sliding_window_pipeline:main"

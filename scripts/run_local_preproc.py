@@ -1,80 +1,25 @@
-#!/usr/bin/env python3
 """
-CLI entrypoint for running the modular neurophysiology and cardiorespiratory analysis pipeline.
+Backwards-compatibility shim.
+Canonical location: scripts/pipeline\run_local_preproc.py
 """
 import sys
-import argparse
+import runpy
 from pathlib import Path
 
-# Add project root to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# Ensure repository root is in sys.path
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
-from src.pipeline.config import PipelineConfig, EMGConfig, ECGConfig, SyncOptoConfig, EphysConfig
-from src.pipeline.pipeline_runner import run_pipeline
-
-def main():
-    parser = argparse.ArgumentParser(
-        description="Modular Neurophysiology Pipeline: Neuropixel & Analog NIDQ Analysis (EMG, ECG, Sync, Opto)"
-    )
-    parser.add_argument("--animal-id", type=str, default="p05", help="Subject / Animal ID")
-    parser.add_argument("--session-id", type=str, default="session_01", help="Session ID")
-    parser.add_argument("--raw-dir", type=str, default="./raw_data", help="Path to raw data directory")
-    parser.add_argument("--out-dir", type=str, default="./output", help="Path to output directory")
-    parser.add_argument("--config", type=str, default=None, help="Path to pre-existing JSON config/journal for exact replication")
-    parser.add_argument("--non-interactive", action="store_true", help="Run without interactive parameter prompts")
-    
-    # Channel Index Flags
-    parser.add_argument("--emg-channel", type=int, default=0, help="EMG channel index (default: 0 for xa0;0)")
-    parser.add_argument("--ecg-channel", type=int, default=1, help="ECG channel index (default: 1 for xa1;1)")
-    parser.add_argument("--no-ecg", action="store_true", help="Disable ECG processing if no ECG was recorded")
-    parser.add_argument("--sync-channel", type=int, default=7, help="Sync channel index (default: 7 for syncNiChan)")
-    parser.add_argument("--opto-channel", type=int, default=6, help="Opto channel index (default: 6 for xa6;6)")
-
-    # Processing Parameter Flags
-    parser.add_argument("--emg-highpass", type=float, default=300.0, help="EMG highpass cutoff (Hz)")
-    parser.add_argument("--emg-lowpass", type=float, default=3000.0, help="EMG lowpass cutoff (Hz)")
-    parser.add_argument("--emg-window-ms", type=float, default=50.0, help="EMG smoothing window (ms)")
-    parser.add_argument("--emg-peak-sd", type=float, default=2.5, help="EMG peak threshold (SD)")
-    parser.add_argument("--ecg-peak-sd", type=float, default=3.0, help="ECG R-peak threshold (SD)")
-    parser.add_argument("--pulse-threshold", type=float, default=2.5, help="Opto/Sync pulse threshold (V)")
-
-    args = parser.parse_args()
-
-    if args.config and Path(args.config).exists():
-        import json
-        with open(args.config, 'r') as f:
-            cfg_dict = json.load(f)
-            if "config" in cfg_dict:
-                cfg_dict = cfg_dict["config"]
-        config = PipelineConfig.from_dict(cfg_dict)
-    else:
-        ecg_enabled = not args.no_ecg
-        config = PipelineConfig(
-            animal_id=args.animal_id,
-            session_id=args.session_id,
-            raw_data_dir=Path(args.raw_dir),
-            output_dir=Path(args.out_dir),
-            emg=EMGConfig(
-                channel_index=args.emg_channel,
-                highpass_cutoff=args.emg_highpass,
-                lowpass_cutoff=args.emg_lowpass,
-                smoothing_window_ms=args.emg_window_ms,
-                peak_threshold_sd=args.emg_peak_sd
-            ),
-            ecg=ECGConfig(
-                enabled=ecg_enabled,
-                channel_index=args.ecg_channel,
-                r_peak_threshold_sd=args.ecg_peak_sd
-            ),
-            sync_opto=SyncOptoConfig(
-                sync_channel_index=args.sync_channel,
-                opto_channel_index=args.opto_channel,
-                pulse_threshold_v=args.pulse_threshold
-            )
-        )
-
-    interactive = not args.non_interactive
-    run_pipeline(config, interactive=interactive)
+# Target script path
+_TARGET = Path(__file__).resolve().parent / "pipeline\run_local_preproc.py"
 
 if __name__ == "__main__":
-    main()
+    runpy.run_path(str(_TARGET), run_name="__main__")
+else:
+    # Forward module attributes for cross-script imports
+    import importlib
+    _mod = importlib.import_module("scripts.pipeline.run_local_preproc")
+    for _k, _v in _mod.__dict__.items():
+        if not _k.startswith("__"):
+            globals()[_k] = _v

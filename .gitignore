@@ -1,4 +1,4 @@
-# Python
+# Python & Virtual Environments
 __pycache__/
 *.py[cod]
 *$py.class
@@ -23,8 +23,30 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+.pytest_cache/
 
-# Neurophysiology & DAQ Raw Data Files
+# Tier 1: Exploratory Sandbox (Private / Untracked)
+scratch/
+exploratory/
+temp/
+output_cache/
+
+# Output Directories (Experiment & Subject Outputs - Local Storage Only)
+outputs/
+output*/
+e097/
+e097_prelaser_respiratory_neurodynamics/
+LP21_fent_EXPT_g1_60s_120s_lupin_run/
+inspiration-off-attractor/
+external/
+
+# Large Presentations, Videos & Slides
+*.pptx
+*.mp4
+presentations/
+sfn_media_extracted/
+
+# Neurophysiology & DAQ Raw / Binary Data Files
 *.bin
 *.cbin
 *.meta
@@ -35,15 +57,14 @@ wheels/
 *.sqlite
 *.h5
 *.hdf5
+*.pkl
 
-# IDE & OS
+# Logs & Temporary Execution Artifacts
+*.log
+CatGT.log
+
+# IDE & OS Configuration
 .vscode/
 .idea/
 .DS_Store
 Thumbs.db
-*.log
-
-# Intermediate cache/temp outputs
-temp/
-scratch/
-output_cache/

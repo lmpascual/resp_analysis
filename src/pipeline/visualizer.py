@@ -86,17 +86,21 @@ def generate_interactive_emg_html(results: SessionResults, output_dir: Path) -> 
             row=3, col=1
         )
 
-    # Overlay translucent shaded laser pulse spans if opto pulses exist
+    # Overlay translucent shaded laser pulse spans if opto pulses exist (batched for high performance)
     if results.opto is not None and len(results.opto.onsets) > 0:
-        for i, opto_start in enumerate(results.opto.onsets):
+        shapes = list(fig.layout.shapes) if fig.layout.shapes else []
+        for i, opto_start in enumerate(results.opto.onsets[:150]):
             opto_dur = results.opto.durations[i] if i < len(results.opto.durations) else 0.1
             opto_end = opto_start + opto_dur
-            fig.add_vrect(
-                x0=opto_start, x1=opto_end,
+            shapes.append(dict(
+                type="rect",
+                xref="x", yref="paper",
+                x0=float(opto_start), x1=float(opto_end),
+                y0=0, y1=1,
                 fillcolor="rgba(255, 69, 0, 0.25)",
-                layer="below", line_width=0,
-                row="all", col=1
-            )
+                layer="below", line_width=0
+            ))
+        fig.update_layout(shapes=shapes)
 
     # Add Range Slider & Quick View Buttons
     t_max = time[-1] if len(time) > 0 else 1.0

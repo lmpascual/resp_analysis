@@ -171,7 +171,78 @@ python scripts/run_local_preproc.py --config "{journal_json_path}" --non-interac
     with open(provenance_md_path, 'w') as f:
         f.write(md_content)
 
+    # 3. Allen Institute for Neural Dynamics (AIND) Sidecar JSON Metadata
+    aind_dir = output_dir / "aind_metadata"
+    aind_dir.mkdir(parents=True, exist_ok=True)
+
+    subject_data = {
+        "describedBy": "https://raw.githubusercontent.com/AllenNeuralDynamics/aind-data-schema/main/src/aind_data_schema/core/subject.py",
+        "schema_version": "0.4.0",
+        "subject_id": config.animal_id,
+        "species": "Mus musculus",
+        "genotype": "Tacr1-Cre" if "tacr1" in config.animal_id.lower() else "Wild-type",
+        "notes": "Multimodal Neuropixels AP + NIDQ Analog Prep"
+    }
+    with open(aind_dir / "subject.json", "w") as f:
+        json.dump(subject_data, f, indent=4)
+
+    acquisition_data = {
+        "describedBy": "https://raw.githubusercontent.com/AllenNeuralDynamics/aind-data-schema/main/src/aind_data_schema/core/acquisition.py",
+        "schema_version": "0.4.0",
+        "session_id": config.session_id,
+        "data_streams": [
+            {
+                "stream_name": "neural_ap",
+                "stream_type": "electrophysiology",
+                "sample_rate_hz": config.ephys.fs_ap,
+                "probe_model": "Neuropixels"
+            },
+            {
+                "stream_name": "analog_nidq",
+                "stream_type": "behavioral_analog",
+                "sample_rate_hz": config.emg.fs,
+                "channels": [
+                    {"signal": "diaphragm_emg", "channel_index": config.emg.channel_index},
+                    {"signal": "ecg", "channel_index": config.ecg.channel_index, "enabled": config.ecg.enabled},
+                    {"signal": "sync_ttl", "channel_index": config.sync_opto.sync_channel_index},
+                    {"signal": "opto_laser", "channel_index": config.sync_opto.opto_channel_index}
+                ]
+            }
+        ]
+    }
+    with open(aind_dir / "acquisition.json", "w") as f:
+        json.dump(acquisition_data, f, indent=4)
+
+    qc_status = "PASS" if execution_summary.get("emg_mean_snr_db", 0) >= 10.0 else "WARN"
+    qc_data = {
+        "describedBy": "https://raw.githubusercontent.com/AllenNeuralDynamics/aind-data-schema/main/src/aind_data_schema/core/quality_control.py",
+        "schema_version": "0.4.0",
+        "status": qc_status,
+        "evaluations": {
+            "emg_mean_snr_db": execution_summary.get("emg_mean_snr_db", 0.0),
+            "breaths_detected": execution_summary.get("breaths_detected", 0),
+            "mean_respiratory_rate_bpm": execution_summary.get("mean_respiratory_rate_bpm", 0.0),
+            "apnea_events_count": execution_summary.get("apnea_events_count", 0),
+            "neuropixel_units_count": execution_summary.get("neuropixel_units_count", 0)
+        }
+    }
+    with open(aind_dir / "quality_control.json", "w") as f:
+        json.dump(qc_data, f, indent=4)
+
+    proc_data = {
+        "describedBy": "https://raw.githubusercontent.com/AllenNeuralDynamics/aind-data-schema/main/src/aind_data_schema/core/processing.py",
+        "schema_version": "0.4.0",
+        "pipeline_name": "resp_analysis",
+        "git_commit": git_commit,
+        "timestamp": timestamp,
+        "stream_pipelines": ["neural_ap", "analog_nidq"],
+        "parameters": config.to_dict()
+    }
+    with open(aind_dir / "processing.json", "w") as f:
+        json.dump(proc_data, f, indent=4)
+
     print(f" -> Journal & provenance records created:")
     print(f"    - {journal_json_path}")
     print(f"    - {provenance_md_path}")
+    print(f"    - AIND Sidecars: {aind_dir}/[subject, acquisition, quality_control, processing].json")
     return journal_json_path
