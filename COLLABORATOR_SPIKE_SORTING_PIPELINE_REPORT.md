@@ -352,3 +352,71 @@ Current Status: **6 passed in 3.71s**
 - `test_ecg_processing`: Tests bandpass filter, R-peak detector, and HRV SDNN.
 - `test_pulse_extraction`: Tests sub-millisecond opto pulse edge detection.
 - `test_pipeline_non_interactive`: Verifies end-to-end execution, diagnostic dashboard rendering, provenance records, and AIND sidecar generation.
+
+
+---
+
+## 8. Relevant Sources, Methodological Lineage & Open-Source Repositories
+
+This pipeline is directly grounded in and extends key methodological frameworks, algorithms, and open-source tools from the electrophysiology and respiratory neurobiology communities:
+
+### 8.1 Modular Spike Sorting & The Lupin Engine
+- **Garcia et al. (2026)**: *Opening the black box: a modular approach to spike sorting*. (bioRxiv / Nature Methods).
+  - *Local reference*: C:\Users\lpascu\OneDrive - SCH\PAPERS\Tools\2026 Garcia, Opening the black box - a modular approach to spike sorting.pdf
+  - *Contribution & Implementation*: Formulates the core algorithmic foundation of our spike sorting pipeline. Specifically:
+    - **Lupin Sorter (spikeinterface.sorters.lupin)**: Deploys Sparse SVD-OMP (Orthogonal Matching Pursuit) matching pursuit to resolve dense overlapping waveforms and intracellular amplitude decrement during high-frequency inspiratory bursts without dropping spikes.
+    - **Locally Exclusive Peak Detection (spikeinterface.sortingcomponents.peak_detection)**: Discovers spatio-temporal extrema across localized probe neighborhoods, eliminating duplicate threshold triggers.
+    - **Non-Rigid Kriging Motion Correction (spikeinterface.sortingcomponents.motion)**: Computes continuous non-rigid displacement maps along the probe and reconstructs spatial voltage profiles via Kriging interpolation, compensating for diaphragmatic respiratory motion.
+    - **50-Channel Sliding Window & Consensus Assembly**: Partitions high-density probes into overlapping spatial sub-bands to limit memory overhead and isolate localized brainstem nuclei, followed by bipartite Jaccard graph merging.
+- **Buccino et al. (2020)**: *SpikeInterface, a unified framework for spike sorting*. **eLife**, 9, e61834. DOI: 10.7554/eLife.61834.
+  - *Local reference*: C:\Users\lpascu\OneDrive - SCH\PAPERS\Tools\2020 Buccino, SpikeInterface.pdf
+  - *Repository*: [SpikeInterface GitHub](https://github.com/SpikeInterface/spikeinterface)
+  - *Contribution*: The foundational interoperability API, memory-mapped recording extractors, sorting containers, and automated quality metric calculation routines.
+
+### 8.2 Respiratory Rhythmogenesis, Attractor Dynamics & CIBRRIG Lineage
+- **Bush & Ramirez (2025/2024)**: *An inspiration-off attractor supports the robust and flexible control of breathing*. Nature / bioRxiv.
+  - *Local reference*: C:\Users\lpascu\OneDrive - SCH\PAPERS\2025 Bush Ramirez, An inspiration-off attractor supports the robust and flexible control of breathing.pdf
+  - *Repository*: [inspiration-off-attractor (VLAD) GitHub](https://github.com/cibr-uw/inspiration-off-attractor) (mirrored locally in xternal/inspiration-off-attractor/).
+  - *Contribution*: Establishes the mathematical and empirical basis for low-dimensional respiratory manifold reconstruction (PCA attractor loops across respiratory cycles, replicated in our Stage 6 pipeline as ushetal2024_replicated_neural_manifold_pca.png and ushetal2024_replicated_single_cell_phase_dynamics.png).
+- **Bush & Ramirez (2024)**: *Latent neural population dynamics in the respiratory rhythm generator*.
+  - *Local reference*: C:\Users\lpascu\OneDrive - SCH\PAPERS\2024 Bush Ramirez, Latent neural population dynamics.pdf
+  - *Repository*: [CIBRRIG GitHub](https://github.com/cibr-uw/cibrrig) / [nbush257/cibrrig](https://github.com/nbush257/cibrrig).
+  - *Contribution*: Provided the initial analog DAQ processing patterns, SpikeGLX metadata parsing conventions, and cardiorespiratory alignment routines which were refactored and modularized into src/pipeline/processing/analog_nidq/.
+- **Foundational Ramirez Lab Cardiorespiratory & Opioid Studies**:
+  - *Baertsch & Ramirez (2018, 2019, 2021)*: Dual mechanisms of opioid-induced respiratory depression (OIRD) in the pre-Bötzinger complex; inspiratory rhythmogenic state shifts.
+  - *Moreira, Ramirez, et al. (2025)*: Retrotrapezoid nucleus (RTN) neuronal modulation and fentanyl-induced respiratory depression.
+  - *Arthurs, Palmiter, & Baertsch (2023)*: Parabrachial tachykinin1 (Tacr1) circuit contributions to state-dependent breathing control.
+  - *Huff & Ramirez (2022, 2023, 2024)*: Optogenetic stimulation of pre-Bötzinger and Postinspiratory (PiCo) complexes during swallowing-breathing coordination.
+
+### 8.3 Comparative Spike Sorting Engines
+- **MountainSort 5**:
+  - *Magland et al. (2023)*: Fast, parameter-light, branchless ISO-SPLIT spike sorting for high-channel recordings.
+  - *Repository*: [MountainSort 5 GitHub](https://github.com/flatironinstitute/mountainsort5)
+  - *Role*: Evaluated in our multi-sorter benchmark as a high-precision, drift-resistant spatial clustering baseline.
+- **Kilosort 4**:
+  - *Pachitariu, Stringer, et al. (2024)*: Next-generation spike sorting with generative drift correction and template matching.
+  - *Repository*: [Kilosort GitHub](https://github.com/MouseLand/Kilosort)
+  - *Role*: Evaluated in our multi-sorter benchmark; identified the template-matching burst dropout failure mode during inspiration (sorter_comparison_drop_window.png).
+
+### 8.4 Signal Preprocessing, Hardware & Manual Curation
+- **CatGT**:
+  - *Karsh, Harris, et al. (Janelia Research Campus)*: High-performance C++ tool for common average referencing and demultiplexing SpikeGLX binary streams.
+  - *Repository*: [CatGT GitHub](https://github.com/billkarsh/CatGT)
+  - *Role*: Implemented in src/pipeline/processing/neural_ap/io_catgt.py for local CAR (loccar [32, 2]) and bandpass filtering (300-9000 Hz).
+- **Phy GUI**:
+  - *Rossant et al. (CortexLab / UCL)*: Interactive visual inspection and manual curation graphical interface for large-scale electrophysiology datasets.
+  - *Repository*: [Phy GitHub](https://github.com/cortex-lab/phy)
+  - *Role*: Integrated via scripts/pipeline/export_to_phy_gui.py for collaborator single-unit inspection and waveform curation.
+- **PyTau**:
+  - *Mahmood, A. (2024)*: Bayesian changepoint detection for neural time series and behavioral state transitions.
+  - *Repository*: [PyTau GitHub](https://github.com/abuzarmahmood/pytau) (mirrored locally in xternal/pytau/).
+  - *Role*: Available for detecting discrete state transitions (e.g. baseline vs apnea vs gasping vs opioid depression).
+
+### 8.5 Metadata Governance & Standards
+- **Allen Institute for Neural Dynamics (AIND) Data Schema**:
+  - *Repository*: [AIND Data Schema GitHub](https://github.com/AllenNeuralDynamics/aind-data-schema)
+  - *Role*: Direct source for our automated sidecar metadata generator (subject.json, cquisition.json, quality_control.json, processing.json) in src/pipeline/journaler.py.
+- **International Brain Laboratory (IBL)**:
+  - *Repository*: [IBL Brainbox Quality Metrics](https://github.com/int-brain-lab/ibllib)
+  - *Role*: Formulates our automated single-unit QC thresholds (refractory ISI violation <0.5%, amplitude cutoff <10%, presence ratio >90%, SNR >2.5).
+
