@@ -132,7 +132,23 @@ Every parameter in the pipeline is explicit, inspectable, and overrideable via i
 
 We evaluated **Lupin (Garcia et al. 2026)**, **MountainSort 5 (MS5)**, and **Kilosort 4 (KS4)** on synchronized Neuropixels recordings from the mouse ventral respiratory column (`LP21`, `LP22`, `TP_Tacr1_1`, `e097`).
 
-### 3.1 Quantitative Yield Comparison (60s Benchmark Window)
+### 3.1 Benchmark Dataset & Precise Snippet Provenance
+
+To provide a controlled, reproducible head-to-head evaluation under identical biophysical conditions, all three sorters were executed on the following synchronized recording snippet:
+
+- **Animal Subject**: Mouse `LP21` (Adult C57BL/6J, acute preparation).
+- **Session / Experiment Run**: `LP21_fent_EXPT_g1` (Pre-fentanyl baseline state).
+- **Raw Data Provenance**:
+  - **Neuropixels AP Stream**: `LP21_fent_EXPT_g1_t0.imec0.ap.bin` (30 kHz, Neuropixels 2.0 probe).
+  - **NIDAQ Analog Stream**: `LP21_fent_EXPT_g1_t0.nidq.bin` (10 kHz; Channel 0: Diaphragm EMG, Channel 5: Plethysmography Airflow, Channel 1: ECG, Channel 7: Sync TTL).
+  - **Raw Server Path**: `Z:\ramirezlab\pascual\rec_data\LP21_fent_EXPT_g1`
+- **Probe Channels Analyzed**: Rostral probe tip channels (Channels 0 to 50, covering the ventral-most 1000 µm of the probe targeting the rostral Ventral Respiratory Column / pre-Bötzinger and Bötzinger complexes).
+- **Precise Temporal Windows**:
+  1. **60-Second Quantitative Yield Benchmark Window**: `t = 0.0 s` to `t = 60.0 s` (Pre-fentanyl stable eupneic baseline breathing; ~150 breaths/min, diaphragm EMG SNR ≥ 12 dB). Also validated across the continuous `t = 60.0 s` to `t = 120.0 s` slice (`outputs/LP21/output_LP21_60s_120s`).
+  2. **High-Resolution Forensic Burst Window (`sorter_comparison_drop_window.png`)**: A 1.0-second zoom (`t = 40.0 s` to `t = 41.0 s`) centered directly across a peak inspiratory diaphragmatic burst transition, accompanied by single-breath verification windows (`t = 7.0 s` to `t = 9.0 s` in `figures/diagnostics/four_breath_raw_ap_comparison.png`).
+- **Standardized Preprocessing**: All three sorters received identical CatGT conditioning (300-9000 Hz bandpass, local CAR `loccar [32, 2]`) and non-rigid Kriging motion correction.
+
+### 3.2 Quantitative Yield Comparison (60s Benchmark Window)
 
 | Sorter Engine | Algorithm Category | Total Units Extracted | Clean SUA (Passed Allen QC) | Mean ISI Violation Rate | Burst Phase Retention (%) | Compute Time (60s recording) |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
@@ -140,7 +156,7 @@ We evaluated **Lupin (Garcia et al. 2026)**, **MountainSort 5 (MS5)**, and **Kil
 | **MountainSort 5** | ISO-SPLIT Clustering | 98 | 24 | 0.31% | 76.8% | **~1.8 min** |
 | **Kilosort 4** | Generative Template Matching | 114 | 19 | 0.84% | 58.4% | ~3.5 min |
 
-### 3.2 The "Burst-Induced Amplitude Drop" Phenomenon (`sorter_comparison_drop_window.png`)
+### 3.3 The "Burst-Induced Amplitude Drop" Phenomenon (`sorter_comparison_drop_window.png`)
 
 A critical finding from our forensic investigation of inspiratory burst windows is documented in `figures/benchmarks/sorter_comparison_drop_window.png`:
 
