@@ -1,8 +1,7 @@
 # Modular Spike Sorting & Multimodal Cardiorespiratory Analysis Pipeline
 ## Technical Report & Collaborator Reference Manual
 
-**Author**: Ramirez Lab (Pascual Lab / Collaborators)  
-**Repository**: `resp_analysis`  
+**Author**: Leila May Pascual (for Ramirez Lab)
 **Date**: September 2026  
 **Primary Application**: Neuropixels High-Density Electrophysiology Coupled to Diaphragm EMG, Plethysmography Airflow, ECG, and Optogenetic Perturbation  
 **Target Brain Regions**: Ventral Respiratory Column (VRC: Bötzinger Complex, pre-Bötzinger Complex, Rostral/Caudal VRG)
@@ -12,20 +11,20 @@
 ## Executive Summary
 
 Recording neural activity in respiratory brainstem networks using Neuropixels probes presents unique computational challenges that conventional cortical spike-sorting pipelines fail to address:
-1. **Mechanical & Non-Stationary Brainstem Motion**: Diaphragmatic contractions and vascular pulsations produce localized, rhythmic axial displacement (5–25 µm drift) synchronized to the breath cycle.
-2. **High-Frequency Burst Dynamics & Intracellular Waveform Attenuation**: Pacemaker and bursting interneurons in the pre-Bötzinger complex undergo rapid spike-frequency adaptation and substantial intracellular amplitude decrement during inspiratory bursts, causing traditional template-matching sorters (e.g. Kilosort) to drop spikes selectively during the critical inspiratory phase.
+1. **Mechanical & Non-Stationary Brainstem Motion**: Diaphragmatic contractions and vascular pulsations produce localized, rhythmic axial displacement (~5–25 µm drift or more) synchronized to the breath cycle.
+2. **High-Frequency Burst Dynamics & Intracellular Waveform Attenuation**: Bursting neurons in the VRC undergo rapid spike-frequency adaptation and substantial intracellular amplitude decrement during inspiratory bursts, causing traditional template-matching sorters (e.g. Kilosort) to drop spikes selectively or split spikes into multiple units.
 3. **Multimodal Synchronization Demands**: Disentangling neural activity requires sample-accurate microsecond alignment between 30 kHz Neuropixels AP electrophysiology, 10 kHz NIDQ analog DAQ channels (diaphragm EMG, plethysmography airflow, ECG), and optogenetic laser pulse TTLs.
 
 To overcome these failure modes, we developed the **Modular Spike Sorting & Multimodal Cardiorespiratory Pipeline (`resp_analysis`)**. This report details:
-- The **end-to-end processing architecture** from raw SpikeGLX binary streams to curated single units and cardiorespiratory manifolds.
-- A **comprehensive parameter decision manifest** documenting every algorithm, threshold, and parameter across all 6 pipeline stages.
+- The **end-to-end processing architecture** from raw SpikeGLX binary streams to curated single units and neural population manifolds.
+- A **comprehensive parameter decision journal** documenting every algorithm, threshold, and parameter across all 6 pipeline stages.
 - An **inventory of all intermediate diagnostic outputs** enabling step-by-step visual inspection of decisions and data stationarity.
-- An **empirical multi-sorter benchmark** comparing **Lupin (SVD-OMP)**, **MountainSort 5 (branchless ISO-SPLIT)**, and **Kilosort 4**, featuring a forensic analysis of burst-phase spike dropouts.
+- An **empirical multi-sorter benchmark** comparing **Lupin (SVD-OMP)**, **MountainSort 5 (branchless ISO-SPLIT)**, and **Kilosort 4**, featuring a post-hoc analysis of burst-phase spike dropouts.
 - A **reproducibility guide** enabling collaborators to execute the entire pipeline end-to-end on their own machines.
 
 ---
 
-## 1. Pipeline Architecture & Data Flow
+## 1. Pipeline Architecture & Data Flow -- Example/Default Parameters
 
 ```
 [ SpikeGLX Acquisition: 30 kHz AP Stream + 10 kHz NIDQ Analog Stream ]
@@ -176,7 +175,10 @@ Kilosort 4:                   │  | |                  | |              │ (Se
 1. **Intracellular Amplitude Attenuation**: During intense inspiratory bursts, respiratory neurons (e.g. pre-BötC pacemakers) fire at instantaneous rates exceeding $60\text{–}120\,\text{Hz}$. Sodium channel inactivation causes spike amplitudes to drop by up to $40\text{–}50\%$ relative to isolated baseline spikes.
 2. **Template Matching Failure (Kilosort 4)**: KS4 relies on rigid spatiotemporal templates. When spike waveforms rapidly shrink during bursts, their dot product with the baseline template falls below the template matching threshold, causing KS4 to drop the densest portion of the burst.
 3. **Clustering Splitting Failure (MountainSort 5)**: MS5's branchless clustering often splits the attenuated burst spikes from the isolated spikes into two separate clusters, creating an artificial low-amplitude "noise" cluster that fails Allen QC.
-4. **Why Lupin Succeeds (SVD-OMP)**: Lupin projects candidate spikes onto an SVD basis representing waveform variance across amplitudes. By iteratively subtracting waveforms using Orthogonal Matching Pursuit (OMP), it tracks spikes even when amplitudes shrink or when overlapping waveforms co-occur during the peak of inspiration.
+4. **Why Lupin Succeeds (SVD-OMP)**:
+   - **What is SVD?** Singular Value Decomposition (SVD) is a matrix factorization technique (the mathematical foundation of PCA) that decomposes complex multi-channel spike waveforms into a small set of orthogonal *basis shapes* (eigen-waveforms) that capture the primary modes of waveform variance (e.g., peak sharpness, repolarization broadening, and amplitude scaling).
+   - **How Lupin uses SVD**: Instead of forcing each neuron to conform to a single rigid average template (as Kilosort does), Lupin represents each unit as a low-dimensional SVD subspace (=8$ singular vectors). When an inspiratory burst causes sodium channel inactivation and shrinks spike amplitude by 40%, the spike still projects cleanly into the neuron's SVD subspace.
+   - **How OMP (Orthogonal Matching Pursuit) resolves overlapping spikes**: During peak inspiration, multiple neighboring units fire synchronously. OMP is a greedy 'peel-and-subtract' algorithm: it identifies the most dominant unit in the SVD basis, estimates its amplitude, subtracts its reconstructed waveform from the raw electrical trace, and iteratively sorts the residual signal. This prevents overlapping spikes from obscuring one another and allows Lupin to achieve 94.2% burst-phase retention.
 
 ---
 
