@@ -28,7 +28,6 @@ from typing import Dict, List, Optional
 import numpy as np
 import pandas as pd
 
-# Add project root to sys.path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
@@ -76,7 +75,6 @@ def parse_geom_depths_from_meta(meta_path: Optional[Path]) -> Dict[int, float]:
         except Exception:
             pass
 
-    # Fallback to standard NP2.0 geometry if incomplete
     for ch in range(385):
         if ch not in depths:
             depths[ch] = float((ch // 2) * 15.0)
@@ -120,8 +118,8 @@ def main():
         help="Destination directory for validation dashboards."
     )
     parser.add_argument(
-        "--time-window", type=float, default=2.5,
-        help="Duration of representative multi-channel trace snippet (s)."
+        "--time-window", type=float, default=1.5,
+        help="Duration of representative multi-channel trace snippet (s, default: 1.5s)."
     )
     parser.add_argument(
         "--individual-pages", action="store_true", default=True,
@@ -158,7 +156,6 @@ def main():
     spk_times = np.load(spike_times_path)
     spk_clusts = np.load(spike_clusters_path)
 
-    # Load cluster info table
     tsv_path = out_dir / "00_spike_sorting_data" / "cluster_info.tsv"
     if not tsv_path.exists():
         tsv_path = out_dir / "cluster_info.tsv"
@@ -166,7 +163,6 @@ def main():
     if tsv_path.exists():
         df_clusters = pd.read_csv(tsv_path, sep="	")
     else:
-        # Generate minimal DataFrame from clusters
         unique_uids = np.unique(spk_clusts)
         df_clusters = pd.DataFrame({
             "cluster_id": unique_uids,
@@ -176,7 +172,6 @@ def main():
             "passed_qc": [True for _ in unique_uids]
         })
 
-    # Sort units by firing rate and select top N
     if "firing_rate_hz" in df_clusters.columns:
         df_clusters = df_clusters.sort_values(by="firing_rate_hz", ascending=False).reset_index(drop=True)
     elif "firing_rate" in df_clusters.columns:
@@ -202,10 +197,8 @@ def main():
     emg_raw = nidq_data.all_channels[0]
     flow_raw = nidq_data.all_channels[5] if len(nidq_data.all_channels) > 5 else None
 
-    # Determine time offset of spike times relative to raw recording
     t_min_spk = float(np.min(spk_times))
     t_max_spk = float(np.max(spk_times))
-    # If spike times are [0, 60s] but recording has offset (e.g. 60s), check pipeline config
     time_offset_s = 0.0
     cfg_snapshot = out_dir / "00_spike_sorting_data" / "pipeline_config_snapshot.json"
     if cfg_snapshot.exists():
@@ -216,7 +209,6 @@ def main():
 
     print(f"Spike train relative time: {t_min_spk:.2f}s to {t_max_spk:.2f}s (offset: +{time_offset_s:.1f}s)")
 
-    # Slice NIDQ to match window if offset exists
     nidq_window_start = time_offset_s + t_min_spk
     nidq_window_end = time_offset_s + t_max_spk + 2.0
     nidq_mask = (t_nidq >= nidq_window_start) & (t_nidq <= nidq_window_end)
@@ -229,7 +221,6 @@ def main():
         emg_raw_w = emg_raw
         flow_raw_w = flow_raw
 
-    # Detect breath onsets and offsets
     breath_onsets, breath_offsets, landmark_prov, _ = detect_respiratory_landmarks(
         emg_raw=emg_raw_w,
         flow_raw=flow_raw_w,
@@ -255,7 +246,6 @@ def main():
         uid = int(row["cluster_id"])
         fr = float(row.get("firing_rate_hz", row.get("firing_rate", 1.0)))
         n_spk = int(row.get("n_spikes", 0))
-        depth = float(row.get("depth_um", row.get("depth", (uid // 2) * 15.0)))
         shank = int(row.get("shank", 0))
         passed_qc = bool(row.get("passed_qc", row.get("passed_allen_qc", True)))
 
@@ -263,39 +253,36 @@ def main():
         if len(u_spk_times) < 5:
             continue
 
-        # Absolute spike timestamps for AP memmap access
         u_abs_times = time_offset_s + u_spk_times
 
-        # Candidate channels around depth (+/- 250 um -> ~32 channels)
-        center_chan = int((depth / 15.0) * 2)
-        center_chan = max(16, min(368, center_chan))
-        cand_chans = np.arange(max(0, center_chan - 20), min(384, center_chan + 20))
-
-        # Find footprint and template waveforms
+        # TRUE global peak channel discovery across all 384 channels
         peak_chan, footprint_chans, channel_ptps, template_wfs = find_unit_channel_footprint(
             mm_ap=mm_ap,
             spike_times_s=u_abs_times,
             fs=fs_ap,
-            candidate_channels=cand_chans,
+            candidate_channels=None,  # Scan all 384 channels!
             n_footprint_channels=args.n_channels,
             max_sample_spikes=100
         )
 
-        # Extract representative multi-channel trace snippet (relative to u_spk_times)
-        # Find highest burst epoch
+        true_depth_um = float(channel_depths.get(peak_chan, (peak_chan // 2) * 15.0))
+
+        # Extract representative multi-channel trace snippet with exact trough alignment
         snippet = extract_representative_trace_snippet(
             mm_ap=mm_ap,
             channels=footprint_chans,
             channel_depths=channel_depths,
             spike_times_s=u_abs_times,
+            peak_channel=peak_chan,
             t_start_s=None,
             window_duration_s=args.time_window,
             fs=fs_ap,
-            ds_factor=10
+            ds_factor=1  # Full resolution for pristine visual fidelity
         )
         # Shift snippet time axis to relative coordinates for display
         snippet.t_axis_s -= time_offset_s
         snippet.spike_times_in_window -= time_offset_s
+        snippet.aligned_trough_times -= time_offset_s
 
         # Compute respiratory phase vector
         rp_res = compute_respiratory_phase_vector(
@@ -311,7 +298,7 @@ def main():
             refractory_ms=1.5
         )
 
-        # Estimate spike amplitudes on peak channel
+        # Estimate spike amplitudes on TRUE peak channel
         peak_sample_idxs = (u_abs_times * fs_ap).astype(np.int64)
         valid_p_idxs = peak_sample_idxs[(peak_sample_idxs >= 15) & (peak_sample_idxs < n_ap_samples - 30)]
         if len(valid_p_idxs) > 0:
@@ -323,19 +310,11 @@ def main():
             spk_amps_uv = np.array([50.0] * len(u_spk_times), dtype=np.float32)
             st_times = u_spk_times
 
-        # Amplitude stationarity
         st_res = compute_amplitude_stationarity(st_times, spk_amps_uv)
-
-        # Time-resolved ISI PDFs (ridge lines)
         tr_isi_res = compute_time_resolved_isi_pdfs(u_spk_times, n_epochs=5)
-
-        # Autocorrelogram
         acg_res = compute_autocorrelogram(u_spk_times)
-
-        # Amplitude cutoff
         cutoff_res = compute_amplitude_cutoff(spk_amps_uv)
 
-        # Waveform kinetics
         peak_template = template_wfs.get(peak_chan, np.zeros(75, dtype=np.float32))
         wf_res = compute_waveform_kinetics(
             template_wf=peak_template,
@@ -343,14 +322,15 @@ def main():
             footprint_chans=footprint_chans,
             channel_depths=channel_depths,
             all_template_wfs=template_wfs,
-            fs=fs_ap
+            fs=fs_ap,
+            noise_sigma=12.0
         )
 
         bundle = UnitValidationBundle(
             cluster_id=uid,
             firing_rate_hz=fr,
             total_spikes=len(u_spk_times),
-            depth_um=depth,
+            depth_um=true_depth_um,
             shank=shank,
             peak_channel=peak_chan,
             footprint_channels=footprint_chans,
@@ -370,7 +350,7 @@ def main():
             unit_file = units_dir / f"unit_{uid:04d}_ch{peak_chan}.html"
             generate_single_unit_html(bundle, unit_file)
 
-        print(f"[{len(bundles):02d}/{len(selected_df):02d}] Unit {uid:04d} | Ch {peak_chan:03d} ({depth:.0f}um) | FR: {fr:.1f}Hz | Phase: {rp_res.subtype_class} (R={rp_res.mean_vector_r}) | ISI Q: {isi_res.violation_rate_q}")
+        print(f"[{len(bundles):02d}/{len(selected_df):02d}] Unit {uid:04d} | Peak Ch {peak_chan:03d} ({true_depth_um:.0f}um) | PTP: {channel_ptps.get(peak_chan, 0.0):.1f}uV | FR: {fr:.1f}Hz | Phase: {rp_res.subtype_class} (R={rp_res.mean_vector_r})")
 
     # 6. Render Unified Multi-Cluster Browser HTML
     browser_html_path = dest_dir / "cluster_validation_browser.html"
@@ -378,7 +358,7 @@ def main():
 
     elapsed = time.time() - t0_start
     print("-" * 80)
-    print(f" Validation suite successfully generated for {len(bundles)} units in {elapsed:.1f}s.")
+    print(f" Validation suite successfully regenerated for {len(bundles)} units in {elapsed:.1f}s.")
     print(f" Unified Browser: file:///{browser_html_path.resolve().as_posix()}")
     if args.individual_pages:
         print(f" Individual Unit Pages: file:///{units_dir.resolve().as_posix()}")
@@ -388,18 +368,13 @@ def main():
     journal_path = out_dir / "RUN_JOURNAL.md"
     timestamp_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     journal_entry = f"""
-## [{timestamp_str}] Phy-Like Single-Cluster Validation Suite Execution
+## [{timestamp_str}] Phy-Like Single-Cluster Validation Suite Execution (V2 - Global Footprint & Trough Snapping)
 - **Units Validated**: {len(bundles)} clusters
+- **Peak Channel Discovery**: Global 384-channel scan (unbiased by local window depth)
+- **Spike Alignment**: Exact negative trough snapping ($dt \le 0.5\,\text{{ms}}$) on peak physical contact
 - **Respiratory Landmark Architecture**:
   * **Inspiration Onset ($0^\circ$)**: Diaphragm EMG Burst Onset (NIDQ Ch 0)
   * **Inspiration Offset ($180^\circ$)**: {landmark_prov}
-- **Footprint Configuration**: {args.n_channels} physical channels per cluster (Bandpass: 300-6000 Hz, 4th-order zero-phase Butterworth)
-- **Validation Tests Performed**:
-  1. Multi-channel footprint voltage traces with exact spike highlight markers
-  2. ISI distribution & refractory period violation threshold ($\tau_{{\text{{ref}}}} = 1.5\,\text{{ms}}$)
-  3. Amplitude stationarity across session & time-resolved ISI probability density functions (PDF ridge lines)
-  4. Circular respiratory phase rose plot, mean resultant vector $(\mathbf{{r}}, \theta_{{\text{{pref}}}})$, and Rayleigh test
-  5. Autocorrelogram (ACG), multi-channel template kinetics (putative cell type), and truncated Gaussian amplitude cutoff
 - **Outputs**:
   * Unified Interactive Browser: `phy_validation_suite/cluster_validation_browser.html`
   * Individual Deep-Dive Pages: `phy_validation_suite/units/`
@@ -407,7 +382,6 @@ def main():
     if journal_path.exists():
         with open(journal_path, "a", encoding="utf-8") as jf:
             jf.write(journal_entry)
-        print(f"Updated {journal_path.name} with execution provenance.")
 
 
 if __name__ == "__main__":

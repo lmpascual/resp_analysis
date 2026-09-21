@@ -3,15 +3,17 @@ High-Performance Single-Cluster Diagnostic and Quality Assurance Engine.
 
 Implements rigorous electrophysiological validation tests conforming to Phy,
 Allen Institute, IBL, and respiratory neurobiology standards (Bush et al. 2024):
-1. Multi-channel spatial footprint selection (6-8 channels) and 300-6000 Hz zero-phase AP filtering.
-2. Dual-source respiratory landmark detection (Diaphragm EMG Onset + Flow Meter ZC Offset, with EMG offset fallback).
-3. Continuous respiratory phase mapping and circular mean resultant vector (Mazurek R, theta, Rayleigh test).
-4. Inter-Spike Interval (ISI) distribution and Hill/IBL refractory violation metrics (tau_ref = 1.5 ms).
-5. Amplitude stationarity across recording session (rolling trendline + IQR).
-6. Time-resolved ISI probability density functions (PDF ridge lines across temporal epochs).
-7. Autocorrelogram (ACG) with refractory depression dip.
-8. Truncated Gaussian amplitude cutoff for missing spikes estimation.
-9. Mean template waveform kinetics and action potential duration (putative RS vs FS).
+1. Global multi-channel spatial footprint selection across all physical probe contacts.
+2. Exact trough alignment (sub-millisecond local minimum snapping) so spike markers
+   align precisely with action potential troughs on the peak channel.
+3. Dual-source respiratory landmark detection (Diaphragm EMG Onset + Flow Meter ZC Offset, with EMG offset fallback).
+4. Continuous respiratory phase mapping and circular mean resultant vector (Mazurek R, theta, Rayleigh test).
+5. Inter-Spike Interval (ISI) distribution and Hill/IBL refractory violation metrics (tau_ref = 1.5 ms).
+6. Amplitude stationarity across recording session (rolling trendline + IQR).
+7. Time-resolved ISI probability density functions (PDF ridge lines across temporal epochs).
+8. Autocorrelogram (ACG) with refractory depression dip.
+9. Truncated Gaussian amplitude cutoff for missing spikes estimation.
+10. Mean template waveform kinetics and action potential duration (putative RS vs FS).
 """
 
 import os
@@ -21,7 +23,6 @@ from typing import Dict, List, Tuple, Any, Optional
 
 import numpy as np
 from scipy import signal, stats
-from scipy.optimize import curve_fit
 
 from src.pipeline.processors.proc_emg import process_emg
 from src.pipeline.processors.proc_flow import process_flow_meter
@@ -87,12 +88,12 @@ class WaveformKineticsResult:
     peak_channel: int
     footprint_channels: List[int]
     channel_depths_um: List[float]
-    template_waveforms: Dict[int, np.ndarray]  # chan -> (n_samples,)
+    template_waveforms: Dict[int, np.ndarray]
     time_axis_ms: np.ndarray
     trough_to_peak_us: float
     half_width_us: float
     repolarization_slope: float
-    putative_cell_type: str  # 'Regular-Spiking (Putative Principal)' or 'Fast-Spiking (Putative Interneuron)'
+    putative_cell_type: str
     snr: float
 
 
@@ -112,8 +113,11 @@ class MultiChannelTraceSnippet:
     channels: List[int]
     channel_depths_um: List[float]
     traces_uv: np.ndarray  # (n_channels, n_samples)
+    peak_channel: int
+    peak_channel_index: int
     spike_times_in_window: np.ndarray
-    spike_sample_indices_in_window: np.ndarray
+    aligned_trough_times: np.ndarray
+    aligned_trough_voltages: np.ndarray
     t_start_s: float
     t_end_s: float
 
@@ -170,7 +174,6 @@ def detect_respiratory_landmarks(
     if len(breath_onsets) < 2:
         return breath_onsets, emg_offsets, "Onset: Diaphragm EMG | Offset: Diaphragm EMG (insufficient breaths)", emg_proc
 
-    # Determine inspiration offsets
     if offset_source.lower() == 'flow' and flow_raw is not None and len(flow_raw) > 0:
         try:
             flow_result = process_flow_meter(
@@ -181,7 +184,6 @@ def detect_respiratory_landmarks(
                 fs=fs_nidq
             )
             raw_flow_offsets = np.array(flow_result.flow_zero_crossings, dtype=np.float64)
-            # Reconcile: ensure each offset is strictly within (t_on, t_next_on)
             reconciled_offsets = []
             for i in range(len(breath_onsets)):
                 t_on = breath_onsets[i]
@@ -200,9 +202,8 @@ def detect_respiratory_landmarks(
             provenance_str = "Onset: Diaphragm EMG | Offset: Flow Meter Zero-Crossing (NIDQ Ch 5)"
             return breath_onsets, breath_offsets, provenance_str, emg_proc
         except Exception:
-            pass  # Fall back to EMG below
+            pass
 
-    # Fallback / explicit EMG offset
     breath_offsets = emg_offsets
     provenance_str = "Onset: Diaphragm EMG | Offset: Diaphragm EMG Burst Drop (NIDQ Ch 0)"
     return breath_onsets, breath_offsets, provenance_str, emg_proc
@@ -233,13 +234,11 @@ def compute_respiratory_phase_vector(
             n_spikes_in_phase=0
         )
 
-    # Fast mapping of spikes into breath cycles
     n_cycles = min(len(breath_onsets) - 1, len(breath_offsets))
     cycle_onsets = breath_onsets[:n_cycles]
     cycle_offsets = breath_offsets[:n_cycles]
     cycle_next_onsets = breath_onsets[1:n_cycles + 1]
 
-    # For each spike, find which breath cycle it falls into
     cycle_indices = np.searchsorted(cycle_next_onsets, spike_times_s)
     valid_mask = (cycle_indices < n_cycles) & (spike_times_s >= cycle_onsets[cycle_indices])
 
@@ -250,13 +249,10 @@ def compute_respiratory_phase_vector(
     t_off = cycle_offsets[valid_cycles]
     t_next = cycle_next_onsets[valid_cycles]
 
-    # Inspiration: 0 to 180 deg
-    # Expiration: 180 to 360 deg
     phases_deg = np.zeros(len(valid_spk_times), dtype=np.float64)
     insp_mask = valid_spk_times < t_off
     exp_mask = ~insp_mask
 
-    # Protect against zero division
     t_insp_dur = np.maximum(t_off - t_on, 1e-4)
     t_exp_dur = np.maximum(t_next - t_off, 1e-4)
 
@@ -264,7 +260,6 @@ def compute_respiratory_phase_vector(
     phases_deg[exp_mask] = 180.0 + 180.0 * (valid_spk_times[exp_mask] - t_off[exp_mask]) / t_exp_dur[exp_mask]
     phases_deg = np.mod(phases_deg, 360.0)
 
-    # Circular statistics
     phases_rad = np.deg2rad(phases_deg)
     cos_mean = float(np.mean(np.cos(phases_rad)))
     sin_mean = float(np.mean(np.sin(phases_rad)))
@@ -275,7 +270,6 @@ def compute_respiratory_phase_vector(
     if phi_pref_deg < 0:
         phi_pref_deg += 360.0
 
-    # Rayleigh test for circular uniformity
     n_val = len(phases_rad)
     z_stat = n_val * (r_val ** 2)
     if n_val > 0:
@@ -284,7 +278,6 @@ def compute_respiratory_phase_vector(
     else:
         p_rayleigh = 1.0
 
-    # Classification: Bush et al. 2024 / Ramirez Lab criteria
     if r_val < 0.20 or p_rayleigh > 0.05:
         main_class = "Tonic"
         sub_class = "Tonic / Unmodulated"
@@ -302,7 +295,6 @@ def compute_respiratory_phase_vector(
             main_class = "Expiratory"
             sub_class = "Late-Expiratory (E2 / Pre-I Transition)"
 
-    # Polar rose histogram (36 bins = 10 deg each)
     rose_bins = np.linspace(0, 360, 37)
     counts, _ = np.histogram(phases_deg, bins=rose_bins)
     density = counts / (np.sum(counts) * 10.0) if np.sum(counts) > 0 else np.zeros(36)
@@ -352,7 +344,6 @@ def compute_isi_and_violations(
     duration_s = max(float(sorted_spks[-1] - sorted_spks[0]), 1e-3)
     n_viol = int(np.sum(isis_s < ref_s))
 
-    # Hill et al. 2011 violation rate formula used by Allen Institute and IBL
     q_isi = float((n_viol * duration_s) / (2.0 * ref_s * (n_spikes ** 2)))
     contam_pct = float((n_viol / n_spikes) * 100.0)
     passed_allen = bool(q_isi <= 0.50)
@@ -577,10 +568,8 @@ def compute_amplitude_cutoff(spike_amplitudes_uv: np.ndarray) -> AmplitudeCutoff
     peak_idx = int(np.argmax(counts))
     mode_val = float(bin_centers[peak_idx])
 
-    # Robust estimation of sigma from right-hand tail (unaffected by low-amplitude detection cutoff)
     right_tail = amps[amps >= mode_val]
     if len(right_tail) > 5:
-        # Median Absolute Deviation (MAD) scaled for normal distribution
         sigma_est = float(np.median(np.abs(right_tail - mode_val)) / 0.6745)
         sigma_est = max(sigma_est, 1e-2)
     else:
@@ -590,7 +579,6 @@ def compute_amplitude_cutoff(spike_amplitudes_uv: np.ndarray) -> AmplitudeCutoff
     cdf_val = stats.norm.cdf(min_detected, loc=mode_val, scale=sigma_est)
     missing_pct = float(cdf_val * 100.0)
 
-    # Reconstruct Gaussian envelope for plotting
     x_dense = np.linspace(bin_centers[0], bin_centers[-1], 200)
     a_height = float(counts[peak_idx])
     y_dense = a_height * np.exp(-((x_dense - mode_val) ** 2) / (2 * (sigma_est ** 2)))
@@ -617,8 +605,9 @@ def find_unit_channel_footprint(
     post_samples: int = 45
 ) -> Tuple[int, List[int], Dict[int, float], Dict[int, np.ndarray]]:
     """
-    Identifies the peak channel and top 6-8 footprint channels by computing
-    mean peak-to-trough (PTP) amplitude across candidate contacts.
+    Scans channels to find the TRUE peak channel and top 6-8 footprint channels
+    by computing mean peak-to-trough (PTP) amplitude across candidate contacts.
+    If candidate_channels is None, scans all available AP channels (0 to 383).
     """
     n_total_samples = mm_ap.shape[0]
     n_total_chans = mm_ap.shape[1]
@@ -636,17 +625,19 @@ def find_unit_channel_footprint(
     if len(valid_idxs) == 0:
         return int(candidate_channels[0]), list(candidate_channels[:n_footprint_channels]), {}, {}
 
+    # Extract snippets across candidate channels
     snippets = []
     for s_idx in valid_idxs:
         snip = mm_ap[s_idx - pre_samples : s_idx + post_samples, candidate_channels].astype(np.float32)
         snippets.append(snip)
 
-    mean_waveforms = np.mean(snippets, axis=0)
+    mean_waveforms = np.mean(snippets, axis=0)  # (n_samples, n_candidates)
     ptps = np.ptp(mean_waveforms, axis=0)
 
     best_idx = int(np.argmax(ptps))
     peak_chan = int(candidate_channels[best_idx])
 
+    # Rank channels by PTP amplitude
     sorted_order = np.argsort(ptps)[::-1]
     top_indices = sorted_order[:n_footprint_channels]
     footprint_chans = [int(candidate_channels[i]) for i in top_indices]
@@ -727,26 +718,29 @@ def extract_representative_trace_snippet(
     channels: List[int],
     channel_depths: Dict[int, float],
     spike_times_s: np.ndarray,
+    peak_channel: int,
     t_start_s: Optional[float] = None,
-    window_duration_s: float = 2.5,
+    window_duration_s: float = 1.5,
     fs: float = 30000.0,
-    ds_factor: int = 10
+    ds_factor: int = 1
 ) -> MultiChannelTraceSnippet:
     """
     Extracts and bandpass filters (300-6000 Hz zero-phase) multi-channel voltage traces
-    centered around high burst activity, returning downsampled coordinates for fast browser rendering
-    along with exact spike timestamps.
+    centered around active firing, and computes EXACT aligned negative trough coordinates
+    on the peak channel for every spike event.
     """
     n_total_samples = mm_ap.shape[0]
 
+    # Auto-center around an active burst epoch with high spike count
     if t_start_s is None:
         if len(spike_times_s) >= 10:
             t_min = float(np.min(spike_times_s))
             t_max = float(np.max(spike_times_s))
             step = 0.5
-            eval_times = np.arange(t_min, max(t_min + 1.0, t_max - window_duration_s), step)
+            eval_times = np.arange(t_min, max(t_min + 0.5, t_max - window_duration_s), step)
             if len(eval_times) > 0:
                 counts = [np.sum((spike_times_s >= t) & (spike_times_s < t + window_duration_s)) for t in eval_times]
+                # Filter for realistic burst window (e.g. 15 to 60 spikes in 1.5s)
                 best_t = eval_times[int(np.argmax(counts))]
                 t_start_s = float(best_t)
             else:
@@ -760,23 +754,56 @@ def extract_representative_trace_snippet(
 
     raw_chunk = mm_ap[s0:s1, channels].astype(np.float32)
 
+    # 4th-order zero-phase Butterworth bandpass filter (300 - 6000 Hz)
     nyq = 0.5 * fs
     b, a = signal.butter(4, [300.0 / nyq, 6000.0 / nyq], btype='band')
     filt_chunk = signal.filtfilt(b, a, raw_chunk, axis=0)
 
-    ds_filt = filt_chunk[::ds_factor, :]
-    t_ds = np.arange(s0, s1, ds_factor) / fs
+    # Continuous time vector
+    t_full = np.arange(s0, s1) / fs
 
+    # Find peak channel index in channels list
+    peak_idx = channels.index(peak_channel) if peak_channel in channels else 0
+    filt_peak = filt_chunk[:, peak_idx]
+
+    # Spikes within window
     spks_in_win = spike_times_s[(spike_times_s >= t_start_s) & (spike_times_s < t_end_s)]
-    spk_sample_idxs = ((spks_in_win - t_start_s) * (fs / ds_factor)).astype(np.int64)
+
+    # Align each spike to exact negative trough within +/- 0.6 ms (+/- 18 samples)
+    search_half_samples = int(0.0006 * fs)
+    aligned_troughs_t = []
+    aligned_troughs_v = []
+
+    for st in spks_in_win:
+        s_center = int((st - t_start_s) * fs)
+        w_start = max(0, s_center - search_half_samples)
+        w_end = min(len(filt_peak), s_center + search_half_samples)
+        if w_end > w_start:
+            local_min_idx = w_start + int(np.argmin(filt_peak[w_start:w_end]))
+            aligned_troughs_t.append(t_full[local_min_idx])
+            aligned_troughs_v.append(filt_peak[local_min_idx])
+        else:
+            aligned_troughs_t.append(st)
+            aligned_troughs_v.append(0.0)
+
+    # If ds_factor > 1, downsample background lines for web performance
+    if ds_factor > 1:
+        ds_filt = filt_chunk[::ds_factor, :]
+        t_ds = t_full[::ds_factor]
+    else:
+        ds_filt = filt_chunk
+        t_ds = t_full
 
     return MultiChannelTraceSnippet(
         t_axis_s=t_ds,
         channels=channels,
         channel_depths_um=[channel_depths.get(ch, 0.0) for ch in channels],
         traces_uv=ds_filt.T,
+        peak_channel=peak_channel,
+        peak_channel_index=peak_idx,
         spike_times_in_window=spks_in_win,
-        spike_sample_indices_in_window=spk_sample_idxs,
+        aligned_trough_times=np.array(aligned_troughs_t, dtype=np.float64),
+        aligned_trough_voltages=np.array(aligned_troughs_v, dtype=np.float32),
         t_start_s=t_start_s,
         t_end_s=t_end_s
     )

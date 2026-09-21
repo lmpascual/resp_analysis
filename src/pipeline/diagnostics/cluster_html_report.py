@@ -2,7 +2,7 @@
 Interactive HTML Dashboard Generator for Spike Sorting Cluster Validation.
 
 Builds a modern, responsive, Phy-like browser validation suite featuring:
-1. Multi-channel filtered voltage traces (6-8 channels) with highlighted spike markers.
+1. Multi-channel filtered voltage traces (6-8 channels) with highlighted spike markers on peak channel troughs.
 2. ISI distribution histogram with refractory cutoff threshold (1.5 ms).
 3. Stationarity Suite: Spike amplitude drift vs time and time-resolved ISI PDF ridge lines.
 4. Respiratory Phase Vector: Circular polar rose plot, mean vector (r, theta), Rayleigh test.
@@ -36,7 +36,7 @@ def build_unit_validation_figure(bundle: UnitValidationBundle) -> go.Figure:
             [{"type": "xy"}, {"type": "xy"}]              # Row 4: Autocorrelogram & Template Waveforms
         ],
         subplot_titles=(
-            f"<b>1. Multi-Channel Filtered Footprint Traces (300-6000 Hz)</b> & Detected Spikes (Red Markers)",
+            f"<b>1. Multi-Channel Filtered Footprint Traces (300-6000 Hz)</b> & Detected Spikes (Red Markers in Troughs on Peak Ch {bundle.peak_channel})",
             f"<b>2. ISI Distribution</b> (Refractory Threshold: 1.5 ms)",
             f"<b>4. Respiratory Phase Rose Plot & Vector</b> ({bundle.respiratory_phase.landmark_provenance})",
             f"<b>3A. Amplitude Stationarity Over Session</b> (Drift: {bundle.stationarity.drift_slope_uv_per_min} uV/min)",
@@ -55,54 +55,66 @@ def build_unit_validation_figure(bundle: UnitValidationBundle) -> go.Figure:
         snip = bundle.trace_snippet
         t_ax = snip.t_axis_s
         n_ch = len(snip.channels)
-        offsets = np.arange(n_ch) * 120.0  # 120 uV spacing between channels
+        
+        # Sort channels by depth for natural anatomical probe stacking (deepest at bottom)
+        chan_depth_pairs = [(ch, snip.channel_depths_um[i], i) for i, ch in enumerate(snip.channels)]
+        chan_depth_pairs.sort(key=lambda x: x[1])  # Ascending depth
+        
+        trace_spacing_uv = 160.0
+        offsets = np.arange(n_ch) * trace_spacing_uv
 
-        for c_idx, ch in enumerate(snip.channels):
-            y_base = offsets[c_idx]
-            y_tr = snip.traces_uv[c_idx] + y_base
-            d_um = snip.channel_depths_um[c_idx] if c_idx < len(snip.channel_depths_um) else 0.0
+        peak_y_base = 0.0
+        for plot_idx, (ch, d_um, orig_idx) in enumerate(chan_depth_pairs):
+            y_base = offsets[plot_idx]
+            y_tr = snip.traces_uv[orig_idx] + y_base
             is_peak = (ch == bundle.peak_channel)
+            if is_peak:
+                peak_y_base = y_base
+
             line_col = "#2563eb" if is_peak else "#64748b"
-            line_w = 1.5 if is_peak else 1.0
+            line_w = 2.0 if is_peak else 1.0
 
             fig.add_trace(
                 go.Scatter(
                     x=t_ax,
                     y=y_tr,
                     mode="lines",
-                    name=f"Ch {ch} ({d_um:.0f}um){' [PEAK]' if is_peak else ''}",
+                    name=f"Ch {ch} ({d_um:.0f}um){' [PEAK SOMA]' if is_peak else ''}",
                     line=dict(color=line_col, width=line_w),
                     hoverinfo="x+y"
                 ),
                 row=1, col=1
             )
 
-            # Highlight spikes on this channel
-            if len(snip.spike_sample_indices_in_window) > 0:
-                valid_s_idxs = snip.spike_sample_indices_in_window[
-                    (snip.spike_sample_indices_in_window >= 0) & 
-                    (snip.spike_sample_indices_in_window < len(y_tr))
-                ]
-                if len(valid_s_idxs) > 0:
-                    fig.add_trace(
-                        go.Scatter(
-                            x=t_ax[valid_s_idxs],
-                            y=y_tr[valid_s_idxs],
-                            mode="markers",
-                            marker=dict(symbol="circle", size=6, color="#ef4444", line=dict(color="#ffffff", width=0.5)),
-                            name=f"Spikes Ch {ch}",
-                            showlegend=False,
-                            hoverinfo="x+y"
-                        ),
-                        row=1, col=1
-                    )
+        # Highlight detected spikes ONLY on the PEAK CHANNEL at aligned negative troughs
+        if len(snip.aligned_trough_times) > 0:
+            spk_y = snip.aligned_trough_voltages + peak_y_base
+            fig.add_trace(
+                go.Scatter(
+                    x=snip.aligned_trough_times,
+                    y=spk_y,
+                    mode="markers",
+                    marker=dict(
+                        symbol="circle",
+                        size=8,
+                        color="#ef4444",
+                        line=dict(color="#ffffff", width=1.0)
+                    ),
+                    name=f"Detected Spikes (Ch {bundle.peak_channel})",
+                    hoverinfo="x+y"
+                ),
+                row=1, col=1
+            )
 
-        # Update y-axis with channel ticks
+        # Update y-axis with channel depth ticks
         fig.update_yaxes(
             tickmode="array",
             tickvals=offsets,
-            ticktext=[f"Ch {ch}<br>({snip.channel_depths_um[i]:.0f}um)" for i, ch in enumerate(snip.channels)],
-            title_text="Electrode Channels",
+            ticktext=[
+                f"<b>Ch {ch}</b> ({d_um:.0f}um){'<br>[PEAK]' if ch == bundle.peak_channel else ''}"
+                for ch, d_um, _ in chan_depth_pairs
+            ],
+            title_text="Electrode Contacts",
             row=1, col=1
         )
         fig.update_xaxes(title_text="Recording Time (s)", row=1, col=1)
@@ -124,7 +136,6 @@ def build_unit_validation_figure(bundle: UnitValidationBundle) -> go.Figure:
         ),
         row=2, col=1
     )
-    # Refractory threshold line
     fig.add_vline(
         x=isi_res.refractory_ms,
         line=dict(color="#dc2626", width=2, dash="dash"),
@@ -156,7 +167,6 @@ def build_unit_validation_figure(bundle: UnitValidationBundle) -> go.Figure:
         row=2, col=2
     )
 
-    # Mean resultant vector arrow
     r_len = rp.mean_vector_r * float(np.max(rp.rose_density)) if np.max(rp.rose_density) > 0 else 0.5
     fig.add_trace(
         go.Scatterpolar(
@@ -186,7 +196,6 @@ def build_unit_validation_figure(bundle: UnitValidationBundle) -> go.Figure:
     # -------------------------------------------------------------
     st = bundle.stationarity
     if len(st.spike_times_s) > 0:
-        # Scatter of spikes (subsample if massive)
         n_pts = len(st.spike_times_s)
         samp_idx = np.random.choice(n_pts, min(3000, n_pts), replace=False)
         fig.add_trace(
@@ -200,7 +209,6 @@ def build_unit_validation_figure(bundle: UnitValidationBundle) -> go.Figure:
             ),
             row=3, col=1
         )
-        # Rolling median trendline
         fig.add_trace(
             go.Scatter(
                 x=st.time_bin_centers_s,
@@ -211,7 +219,6 @@ def build_unit_validation_figure(bundle: UnitValidationBundle) -> go.Figure:
             ),
             row=3, col=1
         )
-        # IQR ribbon
         fig.add_trace(
             go.Scatter(
                 x=list(st.time_bin_centers_s) + list(st.time_bin_centers_s[::-1]),
@@ -275,8 +282,8 @@ def build_unit_validation_figure(bundle: UnitValidationBundle) -> go.Figure:
                 x=wf.time_axis_ms,
                 y=tmpl,
                 mode="lines",
-                name=f"Template Ch {ch}{' (Peak)' if is_peak else ''}",
-                line=dict(color="#dc2626" if is_peak else "#94a3b8", width=2.5 if is_peak else 1.0)
+                name=f"Template Ch {ch}{' (Peak Soma)' if is_peak else ''}",
+                line=dict(color="#dc2626" if is_peak else "#94a3b8", width=3.0 if is_peak else 1.2)
             ),
             row=4, col=2
         )
@@ -287,7 +294,7 @@ def build_unit_validation_figure(bundle: UnitValidationBundle) -> go.Figure:
     fig.update_layout(
         template="plotly_white",
         height=1450,
-        margin=dict(l=60, r=40, t=70, b=60),
+        margin=dict(l=70, r=40, t=70, b=60),
         legend=dict(orientation="h", yanchor="bottom", y=-0.08, xanchor="center", x=0.5),
         font=dict(family="Inter, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif")
     )
@@ -455,7 +462,6 @@ def generate_multi_cluster_browser_html(
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Render plots for each unit
     unit_payloads = []
     for b in bundles:
         fig = build_unit_validation_figure(b)
@@ -485,7 +491,6 @@ def generate_multi_cluster_browser_html(
             "fig_html": fig_div
         })
 
-    # Convert payloads to json
     units_json = json.dumps(unit_payloads)
 
     html_content = f"""<!DOCTYPE html>
@@ -714,11 +719,9 @@ def generate_multi_cluster_browser_html(
             document.getElementById('mPhase').textContent = `R=${{u.phase_r.toFixed(3)}} | ${{u.phase_deg.toFixed(1)}} deg (${{u.subtype_class}})`;
             document.getElementById('mKinetics').textContent = `${{u.trough_to_peak_us.toFixed(0)}} us (${{u.cell_type}})`;
 
-            // Inject figure HTML
             const container = document.getElementById('plot-container');
             container.innerHTML = u.fig_html;
 
-            // Execute Plotly scripts inside injected HTML
             const scripts = container.getElementsByTagName('script');
             for (let i = 0; i < scripts.length; i++) {{
                 eval(scripts[i].innerText);
@@ -750,7 +753,6 @@ def generate_multi_cluster_browser_html(
             populateSelector();
         }}
 
-        // Keyboard navigation
         window.addEventListener('keydown', (e) => {{
             if (e.key === 'ArrowLeft' || e.key === 'j' || e.key === 'J') {{
                 prevUnit();
