@@ -219,7 +219,7 @@ graph TD
     D & K --> L["Panel 1: Multi-Channel Filtered Traces (6-8 ch) + Spike Overlays"]
     K --> M["Panel 2: ISI Distribution + Refractory Cutoff (1.5 ms)"]
     K --> N["Panel 3A: Amplitude Stationarity Scatter + Rolling Trend"]
-    K --> O["Panel 3B: Time-Resolved ISI PDF Lines (5 Epochs)"]
+    K --> O["Panel 3B: Time-Resolved Unsmoothed ISI CDFs (5 Epochs, Log Scale)"]
     I & K --> P["Panel 4: Circular Rose Plot + Respiratory Phase Vector (r, theta)"]
     K --> Q["Panel 5: ACG, Waveform Kinetics & Missing Spikes Fit"]
     
@@ -239,7 +239,7 @@ graph TD
    - Units pass Allen QC when $Q_{\text{ISI}} \le 0.50$ (strict pass: $Q_{\text{ISI}} \le 0.10$).
 3. **Temporal Stationarity Suite**:
    - **Amplitude Drift**: Scatter plot of spike amplitudes across session time ($0 \text{ to } T$) with rolling median trendline and 25%–75% IQR envelope, yielding drift slope ($\mu\text{V}/\text{min}$) and coefficient of variation ($CV_{\text{amp}}$).
-   - **Time-Resolved ISI Densities**: 5-epoch probability density functions (PDF ridge lines) demonstrating whether bursting, refractory depression, or modal firing rate drifts across the session.
+   - **Time-Resolved Unsmoothed ISI CDFs (Log Scale)**: 5-epoch empirical cumulative distribution functions ($F_n(t) = rac{1}{n}\sum \mathbf{1}_{X_i \le t}$) plotted as exact unsmoothed step functions on a logarithmic ISI axis ($\log_{10}	ext{ ISI}$ from $<1\,	ext{ms}$ to $>10\,	ext{s}$). The log transform resolves the long-tail dilemma, simultaneously revealing refractory cutoffs ($1\,	ext{ms}$), intra-burst modes ($2	ext{--}10\,	ext{ms}$), and inter-breath expiratory plateaus ($200	ext{--}1000\,	ext{ms}$) without smoothing artifacts. Temporal stationarity is rigorously quantified via two-sample Kolmogorov-Smirnov (K-S) tests comparing each subsequent epoch against Epoch 1.
 4. **Respiratory Phase Vector Analysis**:
    - **Dual-Source Landmark Architecture**:
      * **Inspiration Onset ($0^\circ$)**: Derived from Diaphragm EMG burst activation.
