@@ -1,0 +1,782 @@
+"""
+High-Performance Single-Cluster Diagnostic and Quality Assurance Engine.
+
+Implements rigorous electrophysiological validation tests conforming to Phy,
+Allen Institute, IBL, and respiratory neurobiology standards (Bush et al. 2024):
+1. Multi-channel spatial footprint selection (6-8 channels) and 300-6000 Hz zero-phase AP filtering.
+2. Dual-source respiratory landmark detection (Diaphragm EMG Onset + Flow Meter ZC Offset, with EMG offset fallback).
+3. Continuous respiratory phase mapping and circular mean resultant vector (Mazurek R, theta, Rayleigh test).
+4. Inter-Spike Interval (ISI) distribution and Hill/IBL refractory violation metrics (tau_ref = 1.5 ms).
+5. Amplitude stationarity across recording session (rolling trendline + IQR).
+6. Time-resolved ISI probability density functions (PDF ridge lines across temporal epochs).
+7. Autocorrelogram (ACG) with refractory depression dip.
+8. Truncated Gaussian amplitude cutoff for missing spikes estimation.
+9. Mean template waveform kinetics and action potential duration (putative RS vs FS).
+"""
+
+import os
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Dict, List, Tuple, Any, Optional
+
+import numpy as np
+from scipy import signal, stats
+from scipy.optimize import curve_fit
+
+from src.pipeline.processors.proc_emg import process_emg
+from src.pipeline.processors.proc_flow import process_flow_meter
+from src.pipeline.config import EMGConfig
+
+
+@dataclass
+class RespiratoryPhaseResult:
+    spike_phases_deg: np.ndarray
+    mean_vector_r: float
+    preferred_phase_deg: float
+    rayleigh_p_value: float
+    functional_class: str
+    subtype_class: str
+    rose_bins_deg: np.ndarray
+    rose_density: np.ndarray
+    landmark_provenance: str
+    n_spikes_in_phase: int
+
+
+@dataclass
+class ISIValidationResult:
+    isi_ms: np.ndarray
+    n_violations: int
+    total_spikes: int
+    violation_rate_q: float
+    contamination_pct: float
+    refractory_ms: float
+    passed_allen_isi: bool
+    hist_bins_ms: np.ndarray
+    hist_counts: np.ndarray
+
+
+@dataclass
+class AmplitudeStationarityResult:
+    spike_times_s: np.ndarray
+    spike_amplitudes_uv: np.ndarray
+    time_bin_centers_s: np.ndarray
+    median_amplitudes_uv: np.ndarray
+    iqr_lower_uv: np.ndarray
+    iqr_upper_uv: np.ndarray
+    drift_slope_uv_per_min: float
+    coefficient_of_variation: float
+
+
+@dataclass
+class TimeResolvedISIPDFResult:
+    epoch_labels: List[str]
+    epoch_time_ranges: List[Tuple[float, float]]
+    pdf_x_ms: np.ndarray
+    epoch_pdfs: List[np.ndarray]
+
+
+@dataclass
+class ACGResult:
+    lags_ms: np.ndarray
+    counts: np.ndarray
+    refractory_dip_ratio: float
+
+
+@dataclass
+class WaveformKineticsResult:
+    peak_channel: int
+    footprint_channels: List[int]
+    channel_depths_um: List[float]
+    template_waveforms: Dict[int, np.ndarray]  # chan -> (n_samples,)
+    time_axis_ms: np.ndarray
+    trough_to_peak_us: float
+    half_width_us: float
+    repolarization_slope: float
+    putative_cell_type: str  # 'Regular-Spiking (Putative Principal)' or 'Fast-Spiking (Putative Interneuron)'
+    snr: float
+
+
+@dataclass
+class AmplitudeCutoffResult:
+    amplitude_bins: np.ndarray
+    amplitude_counts: np.ndarray
+    fitted_gaussian_x: np.ndarray
+    fitted_gaussian_y: np.ndarray
+    estimated_missing_spikes_pct: float
+    passed_cutoff_qc: bool
+
+
+@dataclass
+class MultiChannelTraceSnippet:
+    t_axis_s: np.ndarray
+    channels: List[int]
+    channel_depths_um: List[float]
+    traces_uv: np.ndarray  # (n_channels, n_samples)
+    spike_times_in_window: np.ndarray
+    spike_sample_indices_in_window: np.ndarray
+    t_start_s: float
+    t_end_s: float
+
+
+@dataclass
+class UnitValidationBundle:
+    cluster_id: int
+    firing_rate_hz: float
+    total_spikes: int
+    depth_um: float
+    shank: int
+    peak_channel: int
+    footprint_channels: List[int]
+    passed_allen_qc: bool
+    respiratory_phase: RespiratoryPhaseResult
+    isi: ISIValidationResult
+    stationarity: AmplitudeStationarityResult
+    time_resolved_isi: TimeResolvedISIPDFResult
+    acg: ACGResult
+    waveform: WaveformKineticsResult
+    amplitude_cutoff: AmplitudeCutoffResult
+    trace_snippet: Optional[MultiChannelTraceSnippet] = None
+
+
+def detect_respiratory_landmarks(
+    emg_raw: np.ndarray,
+    flow_raw: Optional[np.ndarray],
+    t_nidq: np.ndarray,
+    fs_nidq: float = 10000.0,
+    emg_cfg: Optional[EMGConfig] = None,
+    offset_source: str = 'flow'
+) -> Tuple[np.ndarray, np.ndarray, str, Any]:
+    """
+    Extracts respiratory breath onsets and offsets.
+    - Inspiration Onset: Diaphragm EMG burst onset.
+    - Inspiration Offset: Flow meter zero-crossing (default) or Diaphragm EMG offset.
+    """
+    if emg_cfg is None:
+        emg_cfg = EMGConfig(
+            fs=fs_nidq,
+            highpass_cutoff=300.0,
+            lowpass_cutoff=3000.0,
+            notch_freq=60.0,
+            smoothing_window_ms=50.0,
+            peak_threshold_sd=2.5,
+            min_breath_duration_ms=100.0,
+            min_inter_breath_interval_ms=150.0
+        )
+
+    emg_proc = process_emg(emg_raw, t_nidq, emg_cfg)
+    breath_onsets = np.array(emg_proc.breath_onsets, dtype=np.float64)
+    emg_offsets = np.array(emg_proc.breath_offsets, dtype=np.float64)
+
+    if len(breath_onsets) < 2:
+        return breath_onsets, emg_offsets, "Onset: Diaphragm EMG | Offset: Diaphragm EMG (insufficient breaths)", emg_proc
+
+    # Determine inspiration offsets
+    if offset_source.lower() == 'flow' and flow_raw is not None and len(flow_raw) > 0:
+        try:
+            flow_result = process_flow_meter(
+                flow_raw=flow_raw,
+                time_vector=t_nidq,
+                valid_onsets=breath_onsets,
+                valid_offsets=emg_offsets,
+                fs=fs_nidq
+            )
+            raw_flow_offsets = np.array(flow_result.flow_zero_crossings, dtype=np.float64)
+            # Reconcile: ensure each offset is strictly within (t_on, t_next_on)
+            reconciled_offsets = []
+            for i in range(len(breath_onsets)):
+                t_on = breath_onsets[i]
+                t_next = breath_onsets[i + 1] if i + 1 < len(breath_onsets) else t_on + 2.0
+                f_off = raw_flow_offsets[i] if i < len(raw_flow_offsets) else 0.0
+                e_off = emg_offsets[i] if i < len(emg_offsets) else t_on + 0.15
+
+                if t_on < f_off < t_next:
+                    reconciled_offsets.append(f_off)
+                elif t_on < e_off < t_next:
+                    reconciled_offsets.append(e_off)
+                else:
+                    reconciled_offsets.append(t_on + 0.15)
+
+            breath_offsets = np.array(reconciled_offsets, dtype=np.float64)
+            provenance_str = "Onset: Diaphragm EMG | Offset: Flow Meter Zero-Crossing (NIDQ Ch 5)"
+            return breath_onsets, breath_offsets, provenance_str, emg_proc
+        except Exception:
+            pass  # Fall back to EMG below
+
+    # Fallback / explicit EMG offset
+    breath_offsets = emg_offsets
+    provenance_str = "Onset: Diaphragm EMG | Offset: Diaphragm EMG Burst Drop (NIDQ Ch 0)"
+    return breath_onsets, breath_offsets, provenance_str, emg_proc
+
+
+def compute_respiratory_phase_vector(
+    spike_times_s: np.ndarray,
+    breath_onsets: np.ndarray,
+    breath_offsets: np.ndarray,
+    landmark_provenance: str = "Onset: EMG | Offset: Flow"
+) -> RespiratoryPhaseResult:
+    """
+    Maps each spike timestamp to continuous respiratory phase [0, 360 deg) and computes
+    Mazurek vector strength R, preferred phase angle, and Rayleigh uniformity p-value.
+    """
+    n_spikes = len(spike_times_s)
+    if n_spikes == 0 or len(breath_onsets) < 2:
+        return RespiratoryPhaseResult(
+            spike_phases_deg=np.array([], dtype=np.float64),
+            mean_vector_r=0.0,
+            preferred_phase_deg=0.0,
+            rayleigh_p_value=1.0,
+            functional_class="Tonic",
+            subtype_class="Tonic / Unmodulated",
+            rose_bins_deg=np.linspace(0, 360, 37),
+            rose_density=np.zeros(36),
+            landmark_provenance=landmark_provenance,
+            n_spikes_in_phase=0
+        )
+
+    # Fast mapping of spikes into breath cycles
+    n_cycles = min(len(breath_onsets) - 1, len(breath_offsets))
+    cycle_onsets = breath_onsets[:n_cycles]
+    cycle_offsets = breath_offsets[:n_cycles]
+    cycle_next_onsets = breath_onsets[1:n_cycles + 1]
+
+    # For each spike, find which breath cycle it falls into
+    cycle_indices = np.searchsorted(cycle_next_onsets, spike_times_s)
+    valid_mask = (cycle_indices < n_cycles) & (spike_times_s >= cycle_onsets[cycle_indices])
+
+    valid_spk_times = spike_times_s[valid_mask]
+    valid_cycles = cycle_indices[valid_mask]
+
+    t_on = cycle_onsets[valid_cycles]
+    t_off = cycle_offsets[valid_cycles]
+    t_next = cycle_next_onsets[valid_cycles]
+
+    # Inspiration: 0 to 180 deg
+    # Expiration: 180 to 360 deg
+    phases_deg = np.zeros(len(valid_spk_times), dtype=np.float64)
+    insp_mask = valid_spk_times < t_off
+    exp_mask = ~insp_mask
+
+    # Protect against zero division
+    t_insp_dur = np.maximum(t_off - t_on, 1e-4)
+    t_exp_dur = np.maximum(t_next - t_off, 1e-4)
+
+    phases_deg[insp_mask] = 180.0 * (valid_spk_times[insp_mask] - t_on[insp_mask]) / t_insp_dur[insp_mask]
+    phases_deg[exp_mask] = 180.0 + 180.0 * (valid_spk_times[exp_mask] - t_off[exp_mask]) / t_exp_dur[exp_mask]
+    phases_deg = np.mod(phases_deg, 360.0)
+
+    # Circular statistics
+    phases_rad = np.deg2rad(phases_deg)
+    cos_mean = float(np.mean(np.cos(phases_rad)))
+    sin_mean = float(np.mean(np.sin(phases_rad)))
+    r_val = float(np.sqrt(cos_mean**2 + sin_mean**2))
+
+    phi_pref_rad = float(np.arctan2(sin_mean, cos_mean))
+    phi_pref_deg = float(np.rad2deg(phi_pref_rad))
+    if phi_pref_deg < 0:
+        phi_pref_deg += 360.0
+
+    # Rayleigh test for circular uniformity
+    n_val = len(phases_rad)
+    z_stat = n_val * (r_val ** 2)
+    if n_val > 0:
+        p_rayleigh = float(np.exp(-z_stat) * (1.0 + (2.0 * z_stat - z_stat**2) / (4.0 * n_val)))
+        p_rayleigh = max(0.0, min(1.0, p_rayleigh))
+    else:
+        p_rayleigh = 1.0
+
+    # Classification: Bush et al. 2024 / Ramirez Lab criteria
+    if r_val < 0.20 or p_rayleigh > 0.05:
+        main_class = "Tonic"
+        sub_class = "Tonic / Unmodulated"
+    else:
+        if 0.0 <= phi_pref_deg < 90.0:
+            main_class = "Inspiratory"
+            sub_class = "Early-Inspiratory (Pre-I)"
+        elif 90.0 <= phi_pref_deg < 180.0:
+            main_class = "Inspiratory"
+            sub_class = "Late-Inspiratory"
+        elif 180.0 <= phi_pref_deg < 270.0:
+            main_class = "Expiratory"
+            sub_class = "Post-Inspiratory (Post-I / Early-Exp)"
+        else:
+            main_class = "Expiratory"
+            sub_class = "Late-Expiratory (E2 / Pre-I Transition)"
+
+    # Polar rose histogram (36 bins = 10 deg each)
+    rose_bins = np.linspace(0, 360, 37)
+    counts, _ = np.histogram(phases_deg, bins=rose_bins)
+    density = counts / (np.sum(counts) * 10.0) if np.sum(counts) > 0 else np.zeros(36)
+
+    return RespiratoryPhaseResult(
+        spike_phases_deg=phases_deg,
+        mean_vector_r=round(r_val, 4),
+        preferred_phase_deg=round(phi_pref_deg, 2),
+        rayleigh_p_value=float(p_rayleigh),
+        functional_class=main_class,
+        subtype_class=sub_class,
+        rose_bins_deg=rose_bins,
+        rose_density=density,
+        landmark_provenance=landmark_provenance,
+        n_spikes_in_phase=len(phases_deg)
+    )
+
+
+def compute_isi_and_violations(
+    spike_times_s: np.ndarray,
+    refractory_ms: float = 1.5,
+    max_isi_ms: float = 100.0,
+    bin_size_ms: float = 0.5
+) -> ISIValidationResult:
+    """
+    Computes fine-grained ISI distribution and Allen/IBL Hill refractory violation rate.
+    """
+    n_spikes = len(spike_times_s)
+    if n_spikes < 2:
+        return ISIValidationResult(
+            isi_ms=np.array([], dtype=np.float64),
+            n_violations=0,
+            total_spikes=n_spikes,
+            violation_rate_q=0.0,
+            contamination_pct=0.0,
+            refractory_ms=refractory_ms,
+            passed_allen_isi=True,
+            hist_bins_ms=np.arange(0, max_isi_ms + bin_size_ms, bin_size_ms),
+            hist_counts=np.zeros(int(max_isi_ms / bin_size_ms))
+        )
+
+    sorted_spks = np.sort(spike_times_s)
+    isis_s = np.diff(sorted_spks)
+    isis_ms = isis_s * 1000.0
+
+    ref_s = refractory_ms / 1000.0
+    duration_s = max(float(sorted_spks[-1] - sorted_spks[0]), 1e-3)
+    n_viol = int(np.sum(isis_s < ref_s))
+
+    # Hill et al. 2011 violation rate formula used by Allen Institute and IBL
+    q_isi = float((n_viol * duration_s) / (2.0 * ref_s * (n_spikes ** 2)))
+    contam_pct = float((n_viol / n_spikes) * 100.0)
+    passed_allen = bool(q_isi <= 0.50)
+
+    bins_ms = np.arange(0, max_isi_ms + bin_size_ms, bin_size_ms)
+    counts, _ = np.histogram(isis_ms, bins=bins_ms)
+
+    return ISIValidationResult(
+        isi_ms=isis_ms,
+        n_violations=n_viol,
+        total_spikes=n_spikes,
+        violation_rate_q=round(q_isi, 4),
+        contamination_pct=round(contam_pct, 2),
+        refractory_ms=refractory_ms,
+        passed_allen_isi=passed_allen,
+        hist_bins_ms=bins_ms,
+        hist_counts=counts
+    )
+
+
+def compute_amplitude_stationarity(
+    spike_times_s: np.ndarray,
+    spike_amplitudes_uv: np.ndarray,
+    n_time_bins: int = 50
+) -> AmplitudeStationarityResult:
+    """
+    Evaluates spike amplitude drift and dispersion over recording time.
+    """
+    n_spikes = len(spike_times_s)
+    if n_spikes == 0:
+        return AmplitudeStationarityResult(
+            spike_times_s=np.array([]),
+            spike_amplitudes_uv=np.array([]),
+            time_bin_centers_s=np.array([]),
+            median_amplitudes_uv=np.array([]),
+            iqr_lower_uv=np.array([]),
+            iqr_upper_uv=np.array([]),
+            drift_slope_uv_per_min=0.0,
+            coefficient_of_variation=0.0
+        )
+
+    t_min = float(np.min(spike_times_s))
+    t_max = float(np.max(spike_times_s))
+    if t_max <= t_min:
+        t_max = t_min + 1.0
+
+    bin_edges = np.linspace(t_min, t_max, n_time_bins + 1)
+    bin_centers = 0.5 * (bin_edges[:-1] + bin_edges[1:])
+
+    bin_idx = np.digitize(spike_times_s, bin_edges) - 1
+    medians, q25s, q75s = [], [], []
+
+    for b in range(n_time_bins):
+        amps_b = spike_amplitudes_uv[bin_idx == b]
+        if len(amps_b) > 0:
+            medians.append(float(np.median(amps_b)))
+            q25s.append(float(np.percentile(amps_b, 25)))
+            q75s.append(float(np.percentile(amps_b, 75)))
+        else:
+            medians.append(float(np.nan))
+            q25s.append(float(np.nan))
+            q75s.append(float(np.nan))
+
+    med_arr = np.array(medians)
+    nans = np.isnan(med_arr)
+    if np.any(nans) and not np.all(nans):
+        med_arr[nans] = np.interp(bin_centers[nans], bin_centers[~nans], med_arr[~nans])
+    elif np.all(nans):
+        med_arr[:] = 0.0
+
+    if n_spikes >= 10:
+        slope, intercept, r_val, p_val, std_err = stats.linregress(spike_times_s, spike_amplitudes_uv)
+        slope_per_min = float(slope * 60.0)
+    else:
+        slope_per_min = 0.0
+
+    mean_amp = float(np.mean(spike_amplitudes_uv))
+    std_amp = float(np.std(spike_amplitudes_uv))
+    cv = float(std_amp / mean_amp) if mean_amp > 1e-3 else 0.0
+
+    return AmplitudeStationarityResult(
+        spike_times_s=spike_times_s,
+        spike_amplitudes_uv=spike_amplitudes_uv,
+        time_bin_centers_s=bin_centers,
+        median_amplitudes_uv=med_arr,
+        iqr_lower_uv=np.array(q25s),
+        iqr_upper_uv=np.array(q75s),
+        drift_slope_uv_per_min=round(slope_per_min, 2),
+        coefficient_of_variation=round(cv, 3)
+    )
+
+
+def compute_time_resolved_isi_pdfs(
+    spike_times_s: np.ndarray,
+    n_epochs: int = 5,
+    max_isi_ms: float = 100.0,
+    n_points: int = 200
+) -> TimeResolvedISIPDFResult:
+    """
+    Computes multi-epoch ISI probability density functions (PDF ridge lines).
+    """
+    x_grid = np.linspace(0.5, max_isi_ms, n_points)
+    if len(spike_times_s) < 10:
+        return TimeResolvedISIPDFResult(
+            epoch_labels=[],
+            epoch_time_ranges=[],
+            pdf_x_ms=x_grid,
+            epoch_pdfs=[]
+        )
+
+    t_min = float(np.min(spike_times_s))
+    t_max = float(np.max(spike_times_s))
+    epoch_edges = np.linspace(t_min, t_max, n_epochs + 1)
+
+    labels = []
+    ranges = []
+    pdfs = []
+
+    for ep in range(n_epochs):
+        t0, t1 = epoch_edges[ep], epoch_edges[ep + 1]
+        spks_ep = spike_times_s[(spike_times_s >= t0) & (spike_times_s < t1)]
+        lbl = f"Epoch {ep + 1} ({t0:.1f}-{t1:.1f}s)"
+        labels.append(lbl)
+        ranges.append((t0, t1))
+
+        if len(spks_ep) >= 5:
+            isis_ms = np.diff(np.sort(spks_ep)) * 1000.0
+            isis_valid = isis_ms[(isis_ms > 0) & (isis_ms <= max_isi_ms)]
+            if len(isis_valid) >= 5:
+                try:
+                    kde = stats.gaussian_kde(isis_valid, bw_method=0.25)
+                    pdf_y = kde.evaluate(x_grid)
+                except Exception:
+                    cnts, _ = np.histogram(isis_valid, bins=np.linspace(0, max_isi_ms, n_points + 1), density=True)
+                    pdf_y = cnts
+            else:
+                pdf_y = np.zeros_like(x_grid)
+        else:
+            pdf_y = np.zeros_like(x_grid)
+
+        pdfs.append(pdf_y)
+
+    return TimeResolvedISIPDFResult(
+        epoch_labels=labels,
+        epoch_time_ranges=ranges,
+        pdf_x_ms=x_grid,
+        epoch_pdfs=pdfs
+    )
+
+
+def compute_autocorrelogram(
+    spike_times_s: np.ndarray,
+    bin_size_ms: float = 1.0,
+    max_lag_ms: float = 50.0
+) -> ACGResult:
+    """
+    Computes cross-time lag autocorrelogram [-max_lag_ms, +max_lag_ms].
+    """
+    n_spikes = len(spike_times_s)
+    n_bins = int(2 * max_lag_ms / bin_size_ms)
+    bins = np.linspace(-max_lag_ms, max_lag_ms, n_bins + 1)
+
+    if n_spikes < 5:
+        return ACGResult(
+            lags_ms=0.5 * (bins[:-1] + bins[1:]),
+            counts=np.zeros(n_bins, dtype=np.int64),
+            refractory_dip_ratio=1.0
+        )
+
+    spks = np.sort(spike_times_s)
+    if n_spikes > 10000:
+        spks = np.sort(np.random.choice(spks, 10000, replace=False))
+
+    diffs = []
+    max_lag_s = max_lag_ms / 1000.0
+    for i, t in enumerate(spks):
+        j = i + 1
+        while j < len(spks) and (spks[j] - t) <= max_lag_s:
+            dt = spks[j] - t
+            diffs.append(dt * 1000.0)
+            diffs.append(-dt * 1000.0)
+            j += 1
+
+    diffs_arr = np.array(diffs, dtype=np.float64)
+    counts, _ = np.histogram(diffs_arr, bins=bins)
+
+    lag_centers = 0.5 * (bins[:-1] + bins[1:])
+    ref_mask = np.abs(lag_centers) <= 1.5
+    baseline_mask = (np.abs(lag_centers) >= 10.0) & (np.abs(lag_centers) <= 40.0)
+
+    mean_ref = np.mean(counts[ref_mask]) if np.any(ref_mask) else 0.0
+    mean_base = np.mean(counts[baseline_mask]) if np.any(baseline_mask) else 1.0
+    dip_ratio = float(mean_ref / max(mean_base, 1e-3))
+
+    return ACGResult(
+        lags_ms=lag_centers,
+        counts=counts,
+        refractory_dip_ratio=round(dip_ratio, 3)
+    )
+
+
+def compute_amplitude_cutoff(spike_amplitudes_uv: np.ndarray) -> AmplitudeCutoffResult:
+    """
+    Estimates missing spikes fraction using mirrored right-tail Gaussian estimation (IBL / Allen Institute standard).
+    """
+    n_spikes = len(spike_amplitudes_uv)
+    if n_spikes < 20:
+        return AmplitudeCutoffResult(
+            amplitude_bins=np.array([0, 100]),
+            amplitude_counts=np.array([n_spikes]),
+            fitted_gaussian_x=np.array([]),
+            fitted_gaussian_y=np.array([]),
+            estimated_missing_spikes_pct=0.0,
+            passed_cutoff_qc=True
+        )
+
+    amps = np.abs(spike_amplitudes_uv)
+    bins = np.linspace(np.percentile(amps, 0.5), np.percentile(amps, 99.5), 60)
+    counts, _ = np.histogram(amps, bins=bins)
+    bin_centers = 0.5 * (bins[:-1] + bins[1:])
+
+    peak_idx = int(np.argmax(counts))
+    mode_val = float(bin_centers[peak_idx])
+
+    # Robust estimation of sigma from right-hand tail (unaffected by low-amplitude detection cutoff)
+    right_tail = amps[amps >= mode_val]
+    if len(right_tail) > 5:
+        # Median Absolute Deviation (MAD) scaled for normal distribution
+        sigma_est = float(np.median(np.abs(right_tail - mode_val)) / 0.6745)
+        sigma_est = max(sigma_est, 1e-2)
+    else:
+        sigma_est = float(max(np.std(amps), 1e-2))
+
+    min_detected = float(bin_centers[0])
+    cdf_val = stats.norm.cdf(min_detected, loc=mode_val, scale=sigma_est)
+    missing_pct = float(cdf_val * 100.0)
+
+    # Reconstruct Gaussian envelope for plotting
+    x_dense = np.linspace(bin_centers[0], bin_centers[-1], 200)
+    a_height = float(counts[peak_idx])
+    y_dense = a_height * np.exp(-((x_dense - mode_val) ** 2) / (2 * (sigma_est ** 2)))
+
+    passed = bool(missing_pct <= 10.0)
+    return AmplitudeCutoffResult(
+        amplitude_bins=bins,
+        amplitude_counts=counts,
+        fitted_gaussian_x=x_dense,
+        fitted_gaussian_y=y_dense,
+        estimated_missing_spikes_pct=round(missing_pct, 2),
+        passed_cutoff_qc=passed
+    )
+
+
+def find_unit_channel_footprint(
+    mm_ap: np.memmap,
+    spike_times_s: np.ndarray,
+    fs: float = 30000.0,
+    candidate_channels: Optional[np.ndarray] = None,
+    n_footprint_channels: int = 8,
+    max_sample_spikes: int = 100,
+    pre_samples: int = 30,
+    post_samples: int = 45
+) -> Tuple[int, List[int], Dict[int, float], Dict[int, np.ndarray]]:
+    """
+    Identifies the peak channel and top 6-8 footprint channels by computing
+    mean peak-to-trough (PTP) amplitude across candidate contacts.
+    """
+    n_total_samples = mm_ap.shape[0]
+    n_total_chans = mm_ap.shape[1]
+
+    if candidate_channels is None:
+        candidate_channels = np.arange(min(384, n_total_chans))
+
+    if len(spike_times_s) == 0:
+        return int(candidate_channels[0]), list(candidate_channels[:n_footprint_channels]), {}, {}
+
+    sample_times = np.random.choice(spike_times_s, min(max_sample_spikes, len(spike_times_s)), replace=False)
+    sample_idxs = (sample_times * fs).astype(np.int64)
+
+    valid_idxs = sample_idxs[(sample_idxs >= pre_samples) & (sample_idxs < n_total_samples - post_samples)]
+    if len(valid_idxs) == 0:
+        return int(candidate_channels[0]), list(candidate_channels[:n_footprint_channels]), {}, {}
+
+    snippets = []
+    for s_idx in valid_idxs:
+        snip = mm_ap[s_idx - pre_samples : s_idx + post_samples, candidate_channels].astype(np.float32)
+        snippets.append(snip)
+
+    mean_waveforms = np.mean(snippets, axis=0)
+    ptps = np.ptp(mean_waveforms, axis=0)
+
+    best_idx = int(np.argmax(ptps))
+    peak_chan = int(candidate_channels[best_idx])
+
+    sorted_order = np.argsort(ptps)[::-1]
+    top_indices = sorted_order[:n_footprint_channels]
+    footprint_chans = [int(candidate_channels[i]) for i in top_indices]
+
+    channel_ptps = {int(candidate_channels[i]): float(ptps[i]) for i in top_indices}
+    template_wfs = {int(candidate_channels[i]): mean_waveforms[:, i] for i in top_indices}
+
+    return peak_chan, footprint_chans, channel_ptps, template_wfs
+
+
+def compute_waveform_kinetics(
+    template_wf: np.ndarray,
+    peak_chan: int,
+    footprint_chans: List[int],
+    channel_depths: Dict[int, float],
+    all_template_wfs: Dict[int, np.ndarray],
+    fs: float = 30000.0,
+    noise_sigma: float = 10.0
+) -> WaveformKineticsResult:
+    """
+    Computes action potential duration, half-width, and putative cell-type classification.
+    """
+    time_ms = (np.arange(len(template_wf)) - 30) / (fs / 1000.0)
+
+    trough_idx = int(np.argmin(template_wf))
+    after_trough = template_wf[trough_idx:]
+    if len(after_trough) > 1:
+        peak_offset = int(np.argmax(after_trough))
+        peak_idx = trough_idx + peak_offset
+    else:
+        peak_idx = trough_idx
+
+    trough_to_peak_samples = max(1, peak_idx - trough_idx)
+    trough_to_peak_us = float((trough_to_peak_samples / fs) * 1e6)
+
+    trough_val = template_wf[trough_idx]
+    baseline_val = float(np.mean(template_wf[:15]))
+    half_depol = baseline_val + 0.5 * (trough_val - baseline_val)
+
+    left_cross = np.where(template_wf[:trough_idx] > half_depol)[0]
+    right_cross = np.where(template_wf[trough_idx:] > half_depol)[0]
+
+    if len(left_cross) > 0 and len(right_cross) > 0:
+        l_idx = left_cross[-1]
+        r_idx = trough_idx + right_cross[0]
+        half_width_us = float(((r_idx - l_idx) / fs) * 1e6)
+    else:
+        half_width_us = 250.0
+
+    if peak_idx > trough_idx:
+        dt_s = (peak_idx - trough_idx) / fs
+        dV = template_wf[peak_idx] - template_wf[trough_idx]
+        repol_slope = float(dV / dt_s / 1e6)
+    else:
+        repol_slope = 0.0
+
+    cell_type = "Regular-Spiking (Putative Principal)" if trough_to_peak_us >= 400.0 else "Fast-Spiking (Putative Interneuron)"
+
+    ptp_amp = float(np.ptp(template_wf))
+    snr = float(round(ptp_amp / max(noise_sigma, 1.0), 2))
+
+    return WaveformKineticsResult(
+        peak_channel=peak_chan,
+        footprint_channels=footprint_chans,
+        channel_depths_um=[channel_depths.get(ch, 0.0) for ch in footprint_chans],
+        template_waveforms=all_template_wfs,
+        time_axis_ms=time_ms,
+        trough_to_peak_us=round(trough_to_peak_us, 1),
+        half_width_us=round(half_width_us, 1),
+        repolarization_slope=round(repol_slope, 2),
+        putative_cell_type=cell_type,
+        snr=snr
+    )
+
+
+def extract_representative_trace_snippet(
+    mm_ap: np.memmap,
+    channels: List[int],
+    channel_depths: Dict[int, float],
+    spike_times_s: np.ndarray,
+    t_start_s: Optional[float] = None,
+    window_duration_s: float = 2.5,
+    fs: float = 30000.0,
+    ds_factor: int = 10
+) -> MultiChannelTraceSnippet:
+    """
+    Extracts and bandpass filters (300-6000 Hz zero-phase) multi-channel voltage traces
+    centered around high burst activity, returning downsampled coordinates for fast browser rendering
+    along with exact spike timestamps.
+    """
+    n_total_samples = mm_ap.shape[0]
+
+    if t_start_s is None:
+        if len(spike_times_s) >= 10:
+            t_min = float(np.min(spike_times_s))
+            t_max = float(np.max(spike_times_s))
+            step = 0.5
+            eval_times = np.arange(t_min, max(t_min + 1.0, t_max - window_duration_s), step)
+            if len(eval_times) > 0:
+                counts = [np.sum((spike_times_s >= t) & (spike_times_s < t + window_duration_s)) for t in eval_times]
+                best_t = eval_times[int(np.argmax(counts))]
+                t_start_s = float(best_t)
+            else:
+                t_start_s = t_min
+        else:
+            t_start_s = 0.0
+
+    t_end_s = t_start_s + window_duration_s
+    s0 = max(0, int(t_start_s * fs))
+    s1 = min(n_total_samples, int(t_end_s * fs))
+
+    raw_chunk = mm_ap[s0:s1, channels].astype(np.float32)
+
+    nyq = 0.5 * fs
+    b, a = signal.butter(4, [300.0 / nyq, 6000.0 / nyq], btype='band')
+    filt_chunk = signal.filtfilt(b, a, raw_chunk, axis=0)
+
+    ds_filt = filt_chunk[::ds_factor, :]
+    t_ds = np.arange(s0, s1, ds_factor) / fs
+
+    spks_in_win = spike_times_s[(spike_times_s >= t_start_s) & (spike_times_s < t_end_s)]
+    spk_sample_idxs = ((spks_in_win - t_start_s) * (fs / ds_factor)).astype(np.int64)
+
+    return MultiChannelTraceSnippet(
+        t_axis_s=t_ds,
+        channels=channels,
+        channel_depths_um=[channel_depths.get(ch, 0.0) for ch in channels],
+        traces_uv=ds_filt.T,
+        spike_times_in_window=spks_in_win,
+        spike_sample_indices_in_window=spk_sample_idxs,
+        t_start_s=t_start_s,
+        t_end_s=t_end_s
+    )

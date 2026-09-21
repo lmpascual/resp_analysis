@@ -80,7 +80,7 @@ Every parameter in the pipeline is explicit, inspectable, and overrideable via i
 
 > [!NOTE]
 > **Why `raw_mmap` instead of default Neo stream reading?**
-> SpikeGLX stores both 30 kHz Neuropixels AP probe streams and 10 kHz NIDAQ analog streams (diaphragm EMG, plethysmography, ECG, opto TTLs) in the same recording folder. Standard SpikeInterface / Neo loaders often crash with stream enumeration/ambiguity errors when two different sampling rates co-occur in one folder. The `raw_mmap` backend directly parses the `.meta` text headers and memory-maps each binary stream independently from disk via `np.memmap`. This eliminates stream ambiguity crashes and enables instant random access to any time window with near-zero RAM overhead, even on >20 GB recordings.
+> SpikeGLX stores both 30 kHz Neuropixels AP probe streams and 10 kHz NIDAQ analog streams (diaphragm EMG, plethysmography, ECG, opto TTLs) in the same recording folder. Standard SpikeInterface / Neo loaders often crash with stream ambiguity errors when two different sampling rates co-occur in one folder. The `raw_mmap` backend directly parses the `.meta` text headers and memory-maps each binary stream independently from disk via `np.memmap`. This eliminates stream ambiguity crashes and enables instant random access to any time window with near-zero RAM overhead, even on >20 GB recordings.
 
 ### Stage 2: Signal Conditioning & Preprocessing (`CatGT`)
 | Parameter | Default Value | Unit / Format | Engineering Rationale & Failure Mode Avoidance |
@@ -171,7 +171,7 @@ MountainSort 5:               │  | | |||    ||||    | |                │ (Pa
 Kilosort 4:                   │  | |                  | |              │ (Severe dropout during peak burst: 42%)
 ```
 
-#### Forensic Findings:
+#### Key Findings:
 1. **Intracellular Amplitude Attenuation**: During intense inspiratory bursts, respiratory neurons (e.g. pre-BötC pacemakers) fire at instantaneous rates exceeding $60\text{–}120\,\text{Hz}$. Sodium channel inactivation causes spike amplitudes to drop by up to $40\text{–}50\%$ relative to isolated baseline spikes.
 2. **Template Matching Failure (Kilosort 4)**: KS4 relies on rigid spatiotemporal templates. When spike waveforms rapidly shrink during bursts, their dot product with the baseline template falls below the template matching threshold, causing KS4 to drop the densest portion of the burst.
 3. **Clustering Splitting Failure (MountainSort 5)**: MS5's branchless clustering often splits the attenuated burst spikes from the isolated spikes into two separate clusters, creating an artificial low-amplitude "noise" cluster that fails Allen QC.
@@ -200,6 +200,61 @@ To enable collaborators to evaluate every processing stage, the pipeline generat
 | `bushetal2024_replicated_interactive_3d_manifold.html` | `scripts.experiments.lp21` / Stage 6 | Interactive Plotly 3D manifold viewer with continuous trajectory animation. | Enables 3D camera rotation to inspect neural state dynamics and cycle separation. |
 | `*_run_journal.json` & `*_provenance.md` | `src.pipeline.journaler` / All | Machine-readable parameters, Git commit hash, Python version, summary statistics. | 100% exact reproduction record for publications. |
 | `aind_metadata/*.json` | `src.pipeline.journaler` / All | AIND-standard `subject.json`, `acquisition.json`, `quality_control.json`, `processing.json`. | Direct compliance with Allen Institute for Neural Dynamics data portals. |
+
+### 4.5. Phy-Like Interactive Single-Cluster Validation Suite
+
+To provide cell-by-cell electrophysiological verification comparable to Phy and the Allen Institute / IBL single-unit standards, the pipeline features a specialized validation and quality assurance suite (`scripts/visualization/generate_phy_like_cluster_validator.py`). This module generates both a unified multi-cluster browser HTML (`cluster_validation_browser.html`) with an interactive unit dropdown selector and keyboard navigation (`[Left/Right]`, `[J/K]`), as well as standalone per-unit deep-dive pages (`units/unit_xxxx.html`).
+
+```mermaid
+graph TD
+    A["Raw Neuropixels AP .bin (30 kHz)"] --> D["Extract 6-8ch Footprint & Bandpass (300-6000 Hz)"]
+    B["Diaphragm EMG (NIDQ Ch 0)"] --> E["Inspiration Onset (0 deg)"]
+    C["Flow Meter (NIDQ Ch 5)"] --> F{"Flow Available & Selected?"}
+    F -- "Yes (Default)" --> G["Flow Zero-Crossing Offset (180 deg)"]
+    F -- "No / EMG Selected" --> H["Diaphragm EMG Burst Drop (180 deg)"]
+    E & G & H --> I["Continuous Respiratory Phase phi(t) in [0, 360 deg)"]
+    
+    J["Spike Times & Clusters (ALF)"] --> K["Map Spikes to Phase & Intervals"]
+    D & K --> L["Panel 1: Multi-Channel Filtered Traces (6-8 ch) + Spike Overlays"]
+    K --> M["Panel 2: ISI Distribution + Refractory Cutoff (1.5 ms)"]
+    K --> N["Panel 3A: Amplitude Stationarity Scatter + Rolling Trend"]
+    K --> O["Panel 3B: Time-Resolved ISI PDF Lines (5 Epochs)"]
+    I & K --> P["Panel 4: Circular Rose Plot + Respiratory Phase Vector (r, theta)"]
+    K --> Q["Panel 5: ACG, Waveform Kinetics & Missing Spikes Fit"]
+    
+    L & M & N & O & P & Q --> R["Phy-Like Interactive HTML Dashboard"]
+```
+
+#### The 5 Core Validation Panels:
+1. **Multi-Channel Voltage Footprint (Phy Trace View)**:
+   - Identifies the unit's peak channel and top 6–8 active footprint channels (contacts within $\le 75\,\mu\text{m}$ along the probe shank).
+   - Zero-phase 4th-order Butterworth bandpass filter ($300\text{--}6000\,\text{Hz}$).
+   - Vertically stacks channel voltage traces with physical depth spacing ($\mu\text{m}$) and overlays prominent highlighted markers (crimson circles) precisely on detected spike peaks/troughs.
+2. **Inter-Spike Interval (ISI) Distribution & Violations**:
+   - Fine-binned histogram ($0.5\,\text{ms}$ bins) up to $100\,\text{ms}$.
+   - Vertical dashed threshold at refractory limit ($\tau_{\text{ref}} = 1.5\,\text{ms}$).
+   - Computes the Allen Institute / IBL refractory contamination rate:
+     $$Q_{\text{ISI}} = \frac{N_{\text{viol}} \cdot T}{2 \cdot \tau_{\text{ref}} \cdot N_{\text{spikes}}^2}, \quad \%_{\text{viol}} = \frac{N_{\text{viol}}}{N_{\text{spikes}}} \times 100\%$$
+   - Units pass Allen QC when $Q_{\text{ISI}} \le 0.50$ (strict pass: $Q_{\text{ISI}} \le 0.10$).
+3. **Temporal Stationarity Suite**:
+   - **Amplitude Drift**: Scatter plot of spike amplitudes across session time ($0 \text{ to } T$) with rolling median trendline and 25%–75% IQR envelope, yielding drift slope ($\mu\text{V}/\text{min}$) and coefficient of variation ($CV_{\text{amp}}$).
+   - **Time-Resolved ISI Densities**: 5-epoch probability density functions (PDF ridge lines) demonstrating whether bursting, refractory depression, or modal firing rate drifts across the session.
+4. **Respiratory Phase Vector Analysis**:
+   - **Dual-Source Landmark Architecture**:
+     * **Inspiration Onset ($0^\circ$)**: Derived from Diaphragm EMG burst activation.
+     * **Inspiration Offset ($180^\circ$)**: Defaults to Pneumotachograph Flow Meter zero-crossing (mechanical expiration onset), with automatic fallback and CLI option (`--insp-offset-source emg`) to Diaphragm EMG burst offset.
+     * **Provenance Documentation**: The exact source combination (`Onset: Diaphragm EMG | Offset: Flow Meter ZC`) is displayed as a prominent badge on the dashboard and logged in `RUN_JOURNAL.md`.
+   - Circular polar rose plot ($0\text{--}360^\circ$) with shaded Inspiratory ($0\text{--}180^\circ$) and Expiratory ($180\text{--}360^\circ$) sectors.
+   - Mean Resultant Vector $(\mathbf{r}, \theta_{\text{pref}})$ where $\mathbf{r} = \sqrt{\bar{C}^2 + \bar{S}^2} \in [0, 1]$ (Mazurek vector strength) and Rayleigh circular uniformity test $p$-value.
+5. **Standard Literature Quality Controls**:
+   - **Autocorrelogram (ACG)**: Lags $[-50\,\text{ms}, +50\,\text{ms}]$ (1 ms bins) testing for the central refractory dip and burst peaks.
+   - **Template Waveform Kinetics**: Trough-to-peak duration ($\mu\text{s}$) classifying putative regular-spiking/principal neurons ($> 400\,\mu\text{s}$) vs fast-spiking interneurons ($\le 400\,\mu\text{s}$).
+   - **Amplitude Cutoff**: Mirrored right-tail Gaussian fit estimating percentage of false-negative missing spikes below detection threshold ($\CV \le 10\%$).
+
+| Diagnostic Output Filename | Generating Script / Stage | Key Features Inspected | Evaluation Criteria & Red Flags |
+| :--- | :--- | :--- | :--- |
+| `cluster_validation_browser.html` | `generate_phy_like_cluster_validator.py` | Multi-channel filtered footprint traces (6-8 ch), spike markers, ISI histogram, amplitude drift trendline, time-resolved ISI PDFs, circular phase rose vector. | **Pass**: Refractory $Q_{\text{ISI}} \le 0.50$; stable amplitude trendline; sharp waveform template; significant phase vector ($p < 0.001$). |
+| `units/unit_*.html` | `generate_phy_like_cluster_validator.py` | Standalone per-cluster deep-dive HTML with complete 5-panel interactive suite and provenance badges. | High-resolution inspection of individual unit isolation, waveform footprint decay, and respiratory locking. |
 
 ---
 
