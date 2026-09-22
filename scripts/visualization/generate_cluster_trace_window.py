@@ -187,7 +187,8 @@ def build_window_figure(
     peak_y_base = 0.0
     for plot_idx, (ch, d_um, orig_idx) in enumerate(chan_depth_pairs):
         y_base = offsets[plot_idx]
-        y_tr = traces[orig_idx] + y_base
+        default_gain = 2.5
+        y_tr = default_gain * traces[orig_idx] + y_base
         is_peak = (ch == peak_chan)
         if is_peak:
             peak_y_base = y_base
@@ -206,14 +207,14 @@ def build_window_figure(
     # Overlay normal spikes
     if len(window_data["spikes_t"]) > 0:
         spk_t = window_data["spikes_t"] - time_offset_s
-        spk_y = window_data["spikes_v"] + peak_y_base
+        spk_y = 2.5 * window_data["spikes_v"] + peak_y_base
         fig.add_trace(
             go.Scatter(
                 x=spk_t,
                 y=spk_y,
                 mode="markers",
                 marker=dict(symbol="circle", size=7, color="#ef4444", line=dict(color="#ffffff", width=0.8)),
-                name=f"Spikes (Ch {peak_channel})",
+                name=f"Spikes (Ch {peak_chan})",
                 hoverinfo="x+y"
             )
         )
@@ -221,7 +222,7 @@ def build_window_figure(
     # Overlay refractory violations (< refractory_ms)
     if len(window_data["viol_t"]) > 0:
         viol_t = window_data["viol_t"] - time_offset_s
-        viol_y = window_data["viol_v"] + peak_y_base
+        viol_y = 2.5 * window_data["viol_v"] + peak_y_base
         fig.add_trace(
             go.Scatter(
                 x=viol_t,

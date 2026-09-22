@@ -1,18 +1,19 @@
 """
-Interactive HTML Dashboard Generator for Spike Sorting Cluster Validation.
+Interactive HTML Validation Report Generator for Single Clusters.
 
-Builds a modern, responsive, Phy-like browser validation suite featuring:
-1. Multi-channel filtered voltage traces (6-8 channels) with highlighted spike markers on peak channel troughs.
-2. ISI distribution histogram with refractory cutoff threshold (1.5 ms).
-3. Stationarity Suite: Spike amplitude drift vs time and time-resolved ISI PDF ridge lines.
-4. Respiratory Phase Vector: Circular polar rose plot, mean vector (r, theta), Rayleigh test.
-5. Literature Quality Controls: Autocorrelogram (ACG), template waveform kinetics, and amplitude cutoff fit.
-6. Ultra-lightweight multi-unit browser shell (<50 KB) with iframe navigation and keyboard shortcuts ([J/K], [Left/Right]).
+Builds a modern, responsive, browser validation suite featuring:
+- Panel 1: Multi-Channel AP Footprint (1.5s Burst Snippet @ 30 kHz Native) with interactive waveform scaling buttons
+- Panel 2: ISI Distribution with 1.0 ms Refractory Cutoff
+- Panel 3A: Amplitude Stationarity Scatter & Rolling Median Trendline
+- Panel 3B: Time-Resolved Unsmoothed ISI CDFs (5 Epochs, Linear Scale)
+- Panel 4: Respiratory Phase Rose Plot & Mazurek Vector Strength
+- Panel 5A: Autocorrelogram (ACG)
+- Panel 5B: Footprint Template Waveforms with generous headroom (decreased scale)
 """
 
 import json
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import Dict, List, Optional
 
 import numpy as np
 import plotly.graph_objects as go
@@ -24,49 +25,50 @@ from src.pipeline.diagnostics.cluster_validator import UnitValidationBundle
 def build_unit_validation_figure(bundle: UnitValidationBundle) -> go.Figure:
     """
     Constructs a 5-panel comprehensive validation figure for a single unit.
+    Expanded height (1850px) and bottom margin to prevent any legend or subplot collision.
     """
     fig = make_subplots(
         rows=4, cols=2,
         column_widths=[0.55, 0.45],
-        row_heights=[0.35, 0.22, 0.22, 0.21],
+        row_heights=[0.30, 0.23, 0.23, 0.24],
         specs=[
             [{"colspan": 2}, None],                       # Row 1: Multi-channel Voltage Traces
             [{"type": "xy"}, {"type": "polar"}],          # Row 2: ISI Distribution & Respiratory Phase Rose
-            [{"type": "xy"}, {"type": "xy"}],             # Row 3: Amplitude Stationarity & Time-Resolved ISI PDFs
+            [{"type": "xy"}, {"type": "xy"}],             # Row 3: Amplitude Stationarity & Time-Resolved ISI CDFs
             [{"type": "xy"}, {"type": "xy"}]              # Row 4: Autocorrelogram & Template Waveforms
         ],
         subplot_titles=(
-            f"<b>1. Multi-Channel Action Potential Footprint (1.5s Burst Snippet @ 30 kHz Native, Zero Downsampling)</b> &bull; Ch {bundle.peak_channel} [PEAK] | Red: Spikes &bull; Amber: ISI Violations (&lt;{bundle.isi.refractory_ms:.1f}ms)",
+            f"<b>1. Multi-Channel Action Potential Footprint (1.5s Burst Snippet @ 30 kHz Native)</b> • Ch {bundle.peak_channel} [PEAK] | Red: Spikes • Amber: ISI Violations (<{bundle.isi.refractory_ms:.1f}ms)",
             f"<b>2. ISI Distribution</b> (Refractory Threshold: {bundle.isi.refractory_ms:.1f} ms)",
             f"<b>4. Respiratory Phase Rose Plot & Vector</b> ({bundle.respiratory_phase.landmark_provenance})",
             f"<b>3A. Amplitude Stationarity Over Session</b> (Drift: {bundle.stationarity.drift_slope_uv_per_min} uV/min)",
-            f"<b>3B. Time-Resolved Unsmoothed ISI CDFs</b> (5 Epochs, Log Scale)",
+            f"<b>3B. Time-Resolved Unsmoothed ISI CDFs</b> (5 Epochs, Linear Scale)",
             f"<b>5A. Autocorrelogram (ACG)</b> (Dip Ratio: {bundle.acg.refractory_dip_ratio})",
             f"<b>5B. Footprint Template Waveforms</b> ({bundle.waveform.putative_cell_type})"
         ),
-        vertical_spacing=0.08,
+        vertical_spacing=0.09,
         horizontal_spacing=0.08
     )
 
     # -------------------------------------------------------------
-    # Row 1: Multi-Channel Filtered Voltage Traces
+    # Row 1: Multi-Channel Filtered Voltage Traces (Default Gain: 2.5x)
     # -------------------------------------------------------------
     if bundle.trace_snippet is not None:
         snip = bundle.trace_snippet
         t_ax = snip.t_axis_s
         n_ch = len(snip.channels)
-        
-        # Sort channels by depth for natural anatomical probe stacking (deepest at bottom)
+
         chan_depth_pairs = [(ch, snip.channel_depths_um[i], i) for i, ch in enumerate(snip.channels)]
         chan_depth_pairs.sort(key=lambda x: x[1])  # Ascending depth
-        
-        trace_spacing_uv = 160.0
+
+        trace_spacing_uv = 180.0
+        default_gain = 2.5
         offsets = np.arange(n_ch) * trace_spacing_uv
 
         peak_y_base = 0.0
         for plot_idx, (ch, d_um, orig_idx) in enumerate(chan_depth_pairs):
             y_base = offsets[plot_idx]
-            y_tr = snip.traces_uv[orig_idx] + y_base
+            y_tr = default_gain * snip.traces_uv[orig_idx] + y_base
             is_peak = (ch == bundle.peak_channel)
             if is_peak:
                 peak_y_base = y_base
@@ -79,7 +81,8 @@ def build_unit_validation_figure(bundle: UnitValidationBundle) -> go.Figure:
                     x=t_ax,
                     y=y_tr,
                     mode="lines",
-                    name=f"Ch {ch} ({d_um:.0f}um){' [PEAK SOMA]' if is_peak else ''}",
+                    name=f"Peak Trace (Ch {ch})" if is_peak else f"Ch {ch}",
+                    showlegend=is_peak,
                     line=dict(color=line_col, width=line_w),
                     hoverinfo="x+y"
                 ),
@@ -88,7 +91,7 @@ def build_unit_validation_figure(bundle: UnitValidationBundle) -> go.Figure:
 
         # Highlight detected spikes ONLY on the PEAK CHANNEL at aligned negative troughs
         if len(snip.aligned_trough_times) > 0:
-            spk_y = snip.aligned_trough_voltages + peak_y_base
+            spk_y = default_gain * snip.aligned_trough_voltages + peak_y_base
             fig.add_trace(
                 go.Scatter(
                     x=snip.aligned_trough_times,
@@ -96,19 +99,20 @@ def build_unit_validation_figure(bundle: UnitValidationBundle) -> go.Figure:
                     mode="markers",
                     marker=dict(
                         symbol="circle",
-                        size=6,
+                        size=7,
                         color="#ef4444",
                         line=dict(color="#ffffff", width=0.5)
                     ),
                     name=f"Detected Spikes (Ch {bundle.peak_channel})",
+                    showlegend=True,
                     hoverinfo="x+y"
                 ),
                 row=1, col=1
             )
 
-        # Highlight ISI Refractory Violations (< refractory_ms) with prominent warning triangles directly on the voltage trace!
+        # Highlight ISI Refractory Violations (< refractory_ms) with prominent warning triangles
         if hasattr(snip, "violation_trough_times") and len(snip.violation_trough_times) > 0:
-            viol_y = snip.violation_trough_voltages + peak_y_base
+            viol_y = default_gain * snip.violation_trough_voltages + peak_y_base
             fig.add_trace(
                 go.Scatter(
                     x=snip.violation_trough_times,
@@ -116,11 +120,12 @@ def build_unit_validation_figure(bundle: UnitValidationBundle) -> go.Figure:
                     mode="markers",
                     marker=dict(
                         symbol="triangle-down",
-                        size=11,
+                        size=12,
                         color="#f59e0b",
-                        line=dict(color="#b45309", width=1.5)
+                        line=dict(color="#b45309", width=1.8)
                     ),
-                    name=f"ISI Violations (&lt;{bundle.isi.refractory_ms:.1f}ms, N={len(snip.violation_trough_times)})",
+                    name=f"ISI Violations (<{bundle.isi.refractory_ms:.1f}ms)",
+                    showlegend=True,
                     hoverinfo="x+y+name"
                 ),
                 row=1, col=1
@@ -205,9 +210,9 @@ def build_unit_validation_figure(bundle: UnitValidationBundle) -> go.Figure:
             period=360,
             tickmode="array",
             tickvals=[0, 90, 180, 270],
-            ticktext=["0 deg<br>(Insp Onset)", "90 deg<br>(Late Insp)", "180 deg<br>(Exp Onset)", "270 deg<br>(Late Exp)"]
+            ticktext=["0 deg<br>(Insp Onset)", "90 deg", "180 deg<br>(Exp Onset)", "270 deg"]
         ),
-        radialaxis=dict(visible=True, showticklabels=False),
+        radialaxis=dict(showticklabels=False, ticks=""),
         row=2, col=2
     )
 
@@ -216,16 +221,14 @@ def build_unit_validation_figure(bundle: UnitValidationBundle) -> go.Figure:
     # -------------------------------------------------------------
     st = bundle.stationarity
     if len(st.spike_times_s) > 0:
-        n_pts = len(st.spike_times_s)
-        samp_idx = np.random.choice(n_pts, min(3000, n_pts), replace=False)
         fig.add_trace(
-            go.Scatter(
-                x=st.spike_times_s[samp_idx],
-                y=st.spike_amplitudes_uv[samp_idx],
+            go.Scattergl(
+                x=st.spike_times_s,
+                y=st.spike_amplitudes_uv,
                 mode="markers",
                 marker=dict(size=3, color="#94a3b8", opacity=0.4),
-                name="Spike Amps (uV)",
-                showlegend=False
+                name="Individual Spikes (uV)",
+                hoverinfo="x+y"
             ),
             row=3, col=1
         )
@@ -255,12 +258,12 @@ def build_unit_validation_figure(bundle: UnitValidationBundle) -> go.Figure:
     fig.update_yaxes(title_text="Amplitude (uV)", row=3, col=1)
 
     # -------------------------------------------------------------
-    # Row 3, Col 2: Time-Resolved Unsmoothed ISI CDFs (Log Scale)
+    # Row 3, Col 2: Time-Resolved Unsmoothed ISI CDFs (Linear Scale)
     # -------------------------------------------------------------
     tr_isi = bundle.time_resolved_isi
     palette = ["#2563eb", "#06b6d4", "#10b981", "#f59e0b", "#ef4444"]
     has_cdf = hasattr(tr_isi, "epoch_cdfs") and len(tr_isi.epoch_cdfs) > 0 and len(tr_isi.epoch_isis_ms) > 0
-    
+
     if has_cdf:
         for ep_idx, (lbl, isis_ep, cdf_ep) in enumerate(zip(tr_isi.epoch_labels, tr_isi.epoch_isis_ms, tr_isi.epoch_cdfs)):
             if len(isis_ep) == 0:
@@ -280,7 +283,7 @@ def build_unit_validation_figure(bundle: UnitValidationBundle) -> go.Figure:
                 ),
                 row=3, col=2
             )
-            
+
         fig.add_trace(
             go.Scatter(
                 x=[bundle.isi.refractory_ms, bundle.isi.refractory_ms], y=[0.0, 1.0],
@@ -292,8 +295,8 @@ def build_unit_validation_figure(bundle: UnitValidationBundle) -> go.Figure:
             row=3, col=2
         )
         fig.update_xaxes(
-            type="log",
-            title_text="Inter-Spike Interval (ms, log scale)",
+            title_text="Inter-Spike Interval (ms)",
+            range=[0, 60],
             row=3, col=2
         )
         fig.update_yaxes(
@@ -335,30 +338,62 @@ def build_unit_validation_figure(bundle: UnitValidationBundle) -> go.Figure:
     fig.update_yaxes(title_text="Coincidence Counts", row=4, col=1)
 
     # -------------------------------------------------------------
-    # Row 4, Col 2: Footprint Template Waveforms
+    # Row 4, Col 2: Footprint Template Waveforms (Decreased Scale / Zoomed Out)
     # -------------------------------------------------------------
     wf = bundle.waveform
+    first_footprint = True
     for ch, tmpl in wf.template_waveforms.items():
         is_peak = (ch == bundle.peak_channel)
+        if is_peak:
+            leg_name = f"Template Ch {ch} (Peak Soma)"
+            show_leg = True
+        else:
+            leg_name = "Adjacent Footprint Templates"
+            show_leg = first_footprint
+            if first_footprint:
+                first_footprint = False
+
         fig.add_trace(
             go.Scatter(
                 x=wf.time_axis_ms,
                 y=tmpl,
                 mode="lines",
-                name=f"Template Ch {ch}{' (Peak Soma)' if is_peak else ''}",
-                line=dict(color="#dc2626" if is_peak else "#94a3b8", width=3.0 if is_peak else 1.2)
+                name=leg_name,
+                showlegend=show_leg,
+                line=dict(color="#dc2626" if is_peak else "#94a3b8", width=3.0 if is_peak else 1.2),
+                hoverinfo="x+y+name"
             ),
             row=4, col=2
         )
-    fig.update_xaxes(title_text="Time Relative to Spike (ms)", range=[-1.0, 1.5], row=4, col=2)
-    fig.update_yaxes(title_text="Voltage (uV)", row=4, col=2)
 
-    # Global Layout
+    # Compute generous y-axis bounds to decrease scale (zoom out)
+    all_tmpls = list(wf.template_waveforms.values())
+    if len(all_tmpls) > 0:
+        min_v = float(min(np.min(t) for t in all_tmpls))
+        max_v = float(max(np.max(t) for t in all_tmpls))
+        ptp_v = max_v - min_v
+        pad = max(25.0, ptp_v * 0.60)
+        y_min_wf = min_v - pad
+        y_max_wf = max_v + pad
+    else:
+        y_min_wf, y_max_wf = -100.0, 50.0
+
+    fig.update_xaxes(title_text="Time Relative to Spike (ms)", range=[-1.0, 1.5], row=4, col=2)
+    fig.update_yaxes(title_text="Voltage (uV)", range=[y_min_wf, y_max_wf], row=4, col=2)
+
+    # Global Layout: Expanded height and bottom margin to guarantee zero overlap
     fig.update_layout(
         template="plotly_white",
-        height=1450,
-        margin=dict(l=70, r=40, t=70, b=60),
-        legend=dict(orientation="h", yanchor="bottom", y=-0.08, xanchor="center", x=0.5),
+        height=1850,
+        margin=dict(l=75, r=45, t=75, b=140),
+        legend=dict(
+            orientation="h",
+            yanchor="top",
+            y=-0.06,
+            xanchor="center",
+            x=0.5,
+            font=dict(size=11)
+        ),
         font=dict(family="Inter, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif")
     )
     return fig
@@ -367,6 +402,7 @@ def build_unit_validation_figure(bundle: UnitValidationBundle) -> go.Figure:
 def generate_single_unit_html(bundle: UnitValidationBundle, output_path: Path) -> Path:
     """
     Renders an individual self-contained HTML validator file for a single unit.
+    Includes interactive waveform vertical scale zoom buttons and full session violation tools.
     """
     fig = build_unit_validation_figure(bundle)
     fig_html = fig.to_html(include_plotlyjs="cdn", full_html=False)
@@ -384,6 +420,26 @@ def generate_single_unit_html(bundle: UnitValidationBundle, output_path: Path) -
         '<span style="background-color:#ef4444;color:#ffffff;padding:4px 10px;border-radius:12px;font-weight:600;font-size:0.85rem;">FAIL (QC Flagged)</span>'
     )
 
+    n_ch = len(snip.channels) if snip else 0
+    trace_offsets = [i * 180.0 for i in range(n_ch)]
+    chan_depth_pairs = [(ch, snip.channel_depths_um[i], i) for i, ch in enumerate(snip.channels)] if snip else []
+    chan_depth_pairs.sort(key=lambda x: x[1])
+    peak_y_base = 0.0
+    for plot_idx, (ch, _, _) in enumerate(chan_depth_pairs):
+        if ch == bundle.peak_channel:
+            peak_y_base = plot_idx * 180.0
+            break
+
+    has_spk = bool(snip and len(snip.aligned_trough_times) > 0)
+    has_viol = bool(snip and hasattr(snip, "violation_trough_times") and len(snip.violation_trough_times) > 0)
+
+    if isi.n_violations == 0:
+        viol_summary_html = '<span style="color:#10b981;font-weight:600;">0 Violations (Clean single-unit isolation, Q = 0.000)</span>'
+        cli_window_cmd = f"python scripts/visualization/generate_cluster_trace_window.py --output-dir outputs/LP21/LP21_fent_EXPT_g1_60s_120s_lupin_run --unit {bundle.cluster_id} --t-start {max(0.0, snip_t0):.1f} --duration 3.0 --open"
+    else:
+        viol_summary_html = f'<span style="color:#d97706;font-weight:600;">{isi.n_violations} Violations (&lt; {isi.refractory_ms:.1f} ms, Q = {isi.violation_rate_q:.3f})</span>'
+        cli_window_cmd = f"python scripts/visualization/generate_cluster_trace_window.py --output-dir outputs/LP21/LP21_fent_EXPT_g1_60s_120s_lupin_run --unit {bundle.cluster_id} --violation 1 --open" 
+
     html_content = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -399,7 +455,7 @@ def generate_single_unit_html(bundle: UnitValidationBundle, output_path: Path) -
             padding: 24px;
         }}
         .container {{
-            max-width: 1400px;
+            max-width: 1440px;
             margin: 0 auto;
             background: #ffffff;
             border-radius: 12px;
@@ -455,6 +511,27 @@ def generate_single_unit_html(bundle: UnitValidationBundle, output_path: Path) -
             color: #0369a1;
             font-weight: 500;
         }}
+        .gain-btn {{
+            background: #ffffff;
+            border: 1px solid #cbd5e1;
+            color: #334155;
+            padding: 5px 12px;
+            border-radius: 6px;
+            font-size: 0.82rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }}
+        .gain-btn:hover {{
+            background: #f1f5f9;
+            border-color: #94a3b8;
+        }}
+        .gain-btn.active {{
+            background: #2563eb;
+            color: #ffffff;
+            border-color: #1d4ed8;
+            box-shadow: 0 1px 2px rgba(37, 99, 235, 0.2);
+        }}
     </style>
 </head>
 <body>
@@ -506,31 +583,98 @@ def generate_single_unit_html(bundle: UnitValidationBundle, output_path: Path) -
             </div>
         </div>
 
-        <div style="background:#f8fafc;border:1px solid #cbd5e1;border-left:4px solid #3b82f6;border-radius:8px;padding:14px 18px;margin-bottom:20px;">
+        <div style="background:#f8fafc;border:1px solid #cbd5e1;border-left:4px solid #3b82f6;border-radius:8px;padding:14px 18px;margin-bottom:16px;">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
                 <span style="font-weight:700;font-size:0.95rem;color:#1e293b;">
-                    🔬 High-Resolution Trace Inspector (Native 30 kHz, Zero Downsampling)
+                    🔬 Panel 1 Trace Inspector &amp; Interactive Waveform Zoom
                 </span>
                 <span style="font-size:0.82rem;background:#e2e8f0;padding:4px 10px;border-radius:6px;color:#334155;font-weight:600;">
                     Snippet: {snip_t0:.2f}s &ndash; {snip_t1:.2f}s (1.5s @ 30,000 pts/sec)
                 </span>
             </div>
-            <div style="font-size:0.86rem;color:#475569;margin-bottom:10px;line-height:1.5;">
+            <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:12px;background:#ffffff;border:1px solid #e2e8f0;padding:8px 12px;border-radius:6px;">
+                <span style="font-size:0.84rem;font-weight:700;color:#1e293b;margin-right:4px;">🔍 Waveform Vertical Scale:</span>
+                <button onclick="setTraceGain(1.0)" class="gain-btn" id="btn-gain-10">1x</button>
+                <button onclick="setTraceGain(2.0)" class="gain-btn" id="btn-gain-20">2x</button>
+                <button onclick="setTraceGain(2.5)" class="gain-btn active" id="btn-gain-25">2.5x (Default)</button>
+                <button onclick="setTraceGain(4.0)" class="gain-btn" id="btn-gain-40">4x</button>
+                <button onclick="setTraceGain(6.0)" class="gain-btn" id="btn-gain-60">6x</button>
+                <button onclick="adjustTraceGain(1.35)" class="gain-btn" title="Increase trace height across all channels">➕ Bigger</button>
+                <button onclick="adjustTraceGain(0.74)" class="gain-btn" title="Decrease trace height across all channels">➖ Smaller</button>
+                <button onclick="setTraceGain(2.5)" class="gain-btn" title="Reset to default scale">↺ Reset</button>
+            </div>
+            <div style="font-size:0.85rem;color:#475569;margin-bottom:10px;line-height:1.5;">
                 Panel 1 displays raw bandpass-filtered (300&ndash;6000 Hz) traces with exact action potential trough snapping and ISI refractory violation markers (&lt; {isi.refractory_ms:.1f} ms).<br>
-                <strong>Full Session Refractory Violations:</strong>
-                {'<span style="color:#10b981;font-weight:600;">0 Violations (Clean single-unit isolation, Q = 0.000)</span>' if isi.n_violations == 0 else f'<span style="color:#d97706;font-weight:600;">{isi.n_violations} Violations (&lt; {isi.refractory_ms:.1f} ms, Q = {isi.violation_rate_q:.3f})</span>'}
+                <strong>Full Session Refractory Violations:</strong> {viol_summary_html}
             </div>
             <div style="font-size:0.82rem;color:#64748b;margin-bottom:6px;font-weight:600;">
                 ⚡ Generate Custom Window or Jump to Violations (Calculates single cluster on-demand in &lt;1.5s):
             </div>
             <div style="background:#0f172a;color:#e2e8f0;border-radius:6px;padding:9px 14px;font-family:Consolas, Monaco, monospace;font-size:0.82rem;display:flex;justify-content:space-between;align-items:center;">
-                <span id="cliCmd">python scripts/visualization/generate_cluster_trace_window.py --output-dir outputs/LP21/LP21_fent_EXPT_g1_60s_120s_lupin_run --unit {bundle.cluster_id} {'--violation 1' if isi.n_violations > 0 else f'--t-start {max(0.0, snip_t0):.1f} --duration 3.0'} --open</span>
+                <span id="cliCmd">{cli_window_cmd}</span>
                 <button onclick="navigator.clipboard.writeText(document.getElementById('cliCmd').innerText); this.innerText='Copied!'; setTimeout(() => this.innerText='Copy Command', 2000);" style="background:#2563eb;border:none;color:#ffffff;padding:5px 12px;border-radius:4px;cursor:pointer;font-size:0.75rem;font-weight:600;margin-left:14px;white-space:nowrap;">Copy Command</button>
             </div>
         </div>
 
         {fig_html}
     </div>
+
+    <script>
+    var currentGain = 2.5;
+    var traceOffsets = {json.dumps(trace_offsets)};
+    var peakBase = {peak_y_base};
+    var nChannels = {n_ch};
+    var hasSpikes = {json.dumps(has_spk)};
+    var hasViol = {json.dumps(has_viol)};
+
+    function setTraceGain(newGain) {{
+        var gd = document.querySelector('.plotly-graph-div');
+        if (!gd || !gd.data) return;
+        var ratio = newGain / currentGain;
+
+        for (var i = 0; i < nChannels; i++) {{
+            if (!gd.data[i]) continue;
+            var base = traceOffsets[i];
+            var yData = gd.data[i].y;
+            var newY = new Float32Array(yData.length);
+            for (var j = 0; j < yData.length; j++) {{
+                newY[j] = base + (yData[j] - base) * ratio;
+            }}
+            Plotly.restyle(gd, {{'y': [newY]}}, [i]);
+        }}
+
+        var curIdx = nChannels;
+        if (hasSpikes && gd.data[curIdx]) {{
+            var spkY = gd.data[curIdx].y;
+            var newSpkY = new Float64Array(spkY.length);
+            for (var k = 0; k < spkY.length; k++) {{
+                newSpkY[k] = peakBase + (spkY[k] - peakBase) * ratio;
+            }}
+            Plotly.restyle(gd, {{'y': [newSpkY]}}, [curIdx]);
+            curIdx++;
+        }}
+
+        if (hasViol && gd.data[curIdx]) {{
+            var violY = gd.data[curIdx].y;
+            var newViolY = new Float64Array(violY.length);
+            for (var m = 0; m < violY.length; m++) {{
+                newViolY[m] = peakBase + (violY[m] - peakBase) * ratio;
+            }}
+            Plotly.restyle(gd, {{'y': [newViolY]}}, [curIdx]);
+        }}
+
+        currentGain = newGain;
+        document.querySelectorAll('.gain-btn').forEach(function(b) {{ b.classList.remove('active'); }});
+        var btnId = 'btn-gain-' + Math.round(newGain * 10);
+        var activeBtn = document.getElementById(btnId);
+        if (activeBtn) activeBtn.classList.add('active');
+    }}
+
+    function adjustTraceGain(factor) {{
+        var target = Math.max(0.5, Math.min(12.0, currentGain * factor));
+        setTraceGain(Math.round(target * 10) / 10);
+    }}
+    </script>
 </body>
 </html>
 """
@@ -567,55 +711,63 @@ def generate_multi_cluster_browser_html(
             "shank": b.shank,
             "peak_channel": b.peak_channel,
             "passed_allen_qc": b.passed_allen_qc,
-            "landmark_provenance": rp.landmark_provenance,
-            "snr": wf.snr,
-            "isi_q": isi.violation_rate_q,
-            "isi_pct": isi.contamination_pct,
-            "phase_r": rp.mean_vector_r,
-            "phase_deg": rp.preferred_phase_deg,
+            "mean_vector_r": rp.mean_vector_r,
+            "preferred_phase_deg": rp.preferred_phase_deg,
             "functional_class": rp.functional_class,
             "subtype_class": rp.subtype_class,
+            "violation_rate_q": isi.violation_rate_q,
+            "contamination_pct": isi.contamination_pct,
+            "snr": wf.snr,
             "trough_to_peak_us": wf.trough_to_peak_us,
-            "cell_type": wf.putative_cell_type.split()[0],
-            "file_url": f"{units_rel_dir}/{unit_file_name}"
+            "putative_cell_type": wf.putative_cell_type,
+            "file_name": f"{units_rel_dir}/{unit_file_name}"
         })
 
     manifest_json = json.dumps(units_manifest)
+    first_unit_file = units_manifest[0]["file_name"] if len(units_manifest) > 0 else ""
 
-    html_content = f"""<!DOCTYPE html>
+    browser_html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sorting Validation Browser</title>
+    <title>Spike Sorting Validation Browser</title>
     <style>
+        * {{ box-sizing: border-box; }}
         body {{
+            margin: 0;
+            padding: 0;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
             background-color: #0f172a;
             color: #f8fafc;
-            margin: 0;
-            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            overflow: hidden;
         }}
-        .browser-container {{
-            max-width: 1480px;
-            margin: 0 auto;
+        .navbar {{
             background: #1e293b;
-            border-radius: 12px;
-            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.4);
-            padding: 18px 24px;
-            border: 1px solid #334155;
-        }}
-        .top-bar {{
+            border-bottom: 1px solid #334155;
+            padding: 10px 20px;
             display: flex;
             flex-wrap: wrap;
             justify-content: space-between;
             align-items: center;
-            border-bottom: 1px solid #334155;
-            padding-bottom: 14px;
-            margin-bottom: 14px;
             gap: 12px;
+            z-index: 100;
         }}
-        .selector-controls {{
+        .nav-left {{
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }}
+        .nav-title {{
+            font-size: 1.15rem;
+            font-weight: 700;
+            color: #38bdf8;
+            letter-spacing: -0.02em;
+        }}
+        .selector-box {{
             display: flex;
             align-items: center;
             gap: 8px;
@@ -624,157 +776,173 @@ def generate_multi_cluster_browser_html(
             background: #0f172a;
             color: #f8fafc;
             border: 1px solid #475569;
-            padding: 8px 14px;
+            padding: 6px 12px;
             border-radius: 6px;
-            font-size: 0.95rem;
-            outline: none;
-            cursor: pointer;
-            min-width: 380px;
-        }}
-        button {{
-            background: #3b82f6;
-            color: #ffffff;
-            border: none;
-            padding: 8px 14px;
-            border-radius: 6px;
+            font-size: 0.88rem;
             font-weight: 600;
             cursor: pointer;
-            transition: background 0.15s ease;
+            outline: none;
         }}
-        button:hover {{
-            background: #2563eb;
+        select:focus {{
+            border-color: #38bdf8;
         }}
-        .filter-btn {{
+        .btn {{
             background: #334155;
-            font-size: 0.85rem;
+            color: #f8fafc;
+            border: 1px solid #475569;
             padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 0.82rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s ease;
         }}
-        .filter-btn.active {{
+        .btn:hover {{
+            background: #475569;
+        }}
+        .btn-active {{
             background: #0284c7;
+            border-color: #38bdf8;
         }}
-        .iframe-wrapper {{
+        .iframe-container {{
+            flex: 1;
             width: 100%;
-            height: 1600px;
-            border-radius: 8px;
-            overflow: hidden;
-            background: #ffffff;
-            box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.1);
+            height: 100%;
+            border: none;
+            background: #f8fafc;
         }}
         iframe {{
             width: 100%;
             height: 100%;
             border: none;
         }}
+        .shortcuts-hint {{
+            font-size: 0.78rem;
+            color: #94a3b8;
+        }}
+        kbd {{
+            background: #0f172a;
+            border: 1px solid #475569;
+            border-radius: 3px;
+            padding: 2px 5px;
+            font-size: 0.75rem;
+            color: #cbd5e1;
+        }}
     </style>
 </head>
 <body>
-    <div class="browser-container">
-        <div class="top-bar">
-            <div>
-                <h2 style="margin:0;font-size:1.35rem;color:#38bdf8;">Spike Sorting Validation Browser</h2>
-                <div style="color:#94a3b8;font-size:0.85rem;margin-top:4px;">
-                    Fast on-demand navigation &bull; Keys: <strong>[J/K]</strong> or <strong>[&larr;/&rarr;]</strong>
-                </div>
+    <div class="navbar">
+        <div class="nav-left">
+            <span class="nav-title">Spike Sorting Validation Browser</span>
+            <div class="selector-box">
+                <label for="unitSelect" style="font-size:0.85rem;color:#94a3b8;">Cluster:</label>
+                <select id="unitSelect" onchange="loadSelectedUnit()"></select>
+                <button class="btn" onclick="prevUnit()" title="Previous Unit (Left Arrow or J)">&#9664; Prev</button>
+                <button class="btn" onclick="nextUnit()" title="Next Unit (Right Arrow or K)">Next &#9654;</button>
             </div>
-
-            <div class="selector-controls">
-                <button onclick="prevUnit()">&larr; Prev</button>
-                <select id="unitSelect" onchange="onSelectUnit(this.value)"></select>
-                <button onclick="nextUnit()">Next &rarr;</button>
-            </div>
-
-            <div style="display:flex;gap:6px;">
-                <button class="filter-btn active" id="filter-all" onclick="applyFilter('all')">All Units</button>
-                <button class="filter-btn" id="filter-qc" onclick="applyFilter('qc')">Passed QC</button>
-                <button class="filter-btn" id="filter-insp" onclick="applyFilter('insp')">Inspiratory</button>
-                <button class="filter-btn" id="filter-exp" onclick="applyFilter('exp')">Expiratory</button>
-                <button class="filter-btn" id="filter-tonic" onclick="applyFilter('tonic')">Tonic</button>
+            <div class="selector-box">
+                <button class="btn btn-active" id="filterAll" onclick="applyFilter('all')">All</button>
+                <button class="btn" id="filterPass" onclick="applyFilter('pass')">Passed QC</button>
+                <button class="btn" id="filterInsp" onclick="applyFilter('insp')">Inspiratory</button>
+                <button class="btn" id="filterExp" onclick="applyFilter('exp')">Expiratory</button>
+                <button class="btn" id="filterTonic" onclick="applyFilter('tonic')">Tonic</button>
             </div>
         </div>
-
-        <div class="iframe-wrapper">
-            <iframe id="viewerFrame" src="" title="Single Unit Validator"></iframe>
+        <div class="shortcuts-hint">
+            Keyboard: <kbd>&larr;</kbd> / <kbd>&rarr;</kbd> or <kbd>J</kbd> / <kbd>K</kbd> to cycle units
         </div>
+    </div>
+    <div class="iframe-container">
+        <iframe id="unitFrame" src="{first_unit_file}"></iframe>
     </div>
 
     <script>
-        const unitsManifest = {manifest_json};
-        let currentFilter = 'all';
-        let filteredIndices = [];
-        let currentIndex = 0;
+    const manifest = {manifest_json};
+    let currentFilter = 'all';
+    let filteredUnits = [...manifest];
+    let currentIndex = 0;
 
-        function populateSelector() {{
-            const sel = document.getElementById('unitSelect');
-            sel.innerHTML = '';
-            filteredIndices = [];
+    const selectEl = document.getElementById('unitSelect');
+    const frameEl = document.getElementById('unitFrame');
 
-            unitsManifest.forEach((u, idx) => {{
-                let matches = true;
-                if (currentFilter === 'qc' && !u.passed_allen_qc) matches = false;
-                if (currentFilter === 'insp' && u.functional_class !== 'Inspiratory') matches = false;
-                if (currentFilter === 'exp' && u.functional_class !== 'Expiratory') matches = false;
-                if (currentFilter === 'tonic' && u.functional_class !== 'Tonic') matches = false;
-
-                if (matches) {{
-                    filteredIndices.push(idx);
-                    const opt = document.createElement('option');
-                    opt.value = idx;
-                    opt.textContent = `Unit ${{String(u.cluster_id).padStart(4, '0')}} | Peak Ch ${{u.peak_channel}} (${{u.depth_um.toFixed(0)}}um) | ${{u.firing_rate_hz.toFixed(1)}}Hz | ${{u.subtype_class}}`;
-                    sel.appendChild(opt);
-                }}
-            }});
-
-            if (filteredIndices.length > 0) {{
-                loadUnit(filteredIndices[0]);
-            }} else {{
-                document.getElementById('viewerFrame').srcdoc = '<div style="padding:40px;text-align:center;font-family:sans-serif;color:#64748b;">No units match the selected filter.</div>';
-            }}
+    function populateDropdown() {{
+        selectEl.innerHTML = '';
+        filteredUnits.forEach((u, idx) => {{
+            const opt = document.createElement('option');
+            opt.value = idx;
+            opt.textContent = `Unit ${{String(u.cluster_id).padStart(4, '0')}} | Ch ${{u.peak_channel}} (${{Math.round(u.depth_um)}}um) | ${{u.firing_rate_hz.toFixed(1)}}Hz | ${{u.subtype_class}}`;
+            selectEl.appendChild(opt);
+        }});
+        if (filteredUnits.length > 0) {{
+            currentIndex = 0;
+            selectEl.selectedIndex = 0;
+            frameEl.src = filteredUnits[0].file_name;
+        }} else {{
+            frameEl.src = 'about:blank';
         }}
+    }}
 
-        function loadUnit(index) {{
-            currentIndex = index;
-            const u = unitsManifest[index];
-            document.getElementById('unitSelect').value = index;
-            document.getElementById('viewerFrame').src = u.file_url;
+    function loadSelectedUnit() {{
+        const idx = parseInt(selectEl.value, 10);
+        if (idx >= 0 && idx < filteredUnits.length) {{
+            currentIndex = idx;
+            frameEl.src = filteredUnits[currentIndex].file_name;
         }}
+    }}
 
-        function onSelectUnit(idx) {{
-            loadUnit(parseInt(idx));
-        }}
+    function nextUnit() {{
+        if (filteredUnits.length === 0) return;
+        currentIndex = (currentIndex + 1) % filteredUnits.length;
+        selectEl.selectedIndex = currentIndex;
+        frameEl.src = filteredUnits[currentIndex].file_name;
+    }}
 
-        function prevUnit() {{
-            const currentPos = filteredIndices.indexOf(currentIndex);
-            if (currentPos > 0) {{
-                loadUnit(filteredIndices[currentPos - 1]);
-            }}
-        }}
+    function prevUnit() {{
+        if (filteredUnits.length === 0) return;
+        currentIndex = (currentIndex - 1 + filteredUnits.length) % filteredUnits.length;
+        selectEl.selectedIndex = currentIndex;
+        frameEl.src = filteredUnits[currentIndex].file_name;
+    }}
 
-        function nextUnit() {{
-            const currentPos = filteredIndices.indexOf(currentIndex);
-            if (currentPos >= 0 && currentPos < filteredIndices.length - 1) {{
-                loadUnit(filteredIndices[currentPos + 1]);
-            }}
-        }}
-
-        function applyFilter(f) {{
-            currentFilter = f;
-            document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
-            document.getElementById('filter-' + f).classList.add('active');
-            populateSelector();
-        }}
-
-        window.addEventListener('keydown', (e) => {{
-            if (e.key === 'ArrowLeft' || e.key === 'j' || e.key === 'J') {{
-                prevUnit();
-            }} else if (e.key === 'ArrowRight' || e.key === 'k' || e.key === 'K') {{
-                nextUnit();
+    function applyFilter(filterType) {{
+        currentFilter = filterType;
+        document.querySelectorAll('.btn').forEach(b => {{
+            if (['filterAll', 'filterPass', 'filterInsp', 'filterExp', 'filterTonic'].includes(b.id)) {{
+                b.classList.remove('btn-active');
             }}
         }});
+        if (filterType === 'all') {{
+            document.getElementById('filterAll').classList.add('btn-active');
+            filteredUnits = [...manifest];
+        }} else if (filterType === 'pass') {{
+            document.getElementById('filterPass').classList.add('btn-active');
+            filteredUnits = manifest.filter(u => u.passed_allen_qc);
+        }} else if (filterType === 'insp') {{
+            document.getElementById('filterInsp').classList.add('btn-active');
+            filteredUnits = manifest.filter(u => u.functional_class === 'Inspiratory');
+        }} else if (filterType === 'exp') {{
+            document.getElementById('filterExp').classList.add('btn-active');
+            filteredUnits = manifest.filter(u => u.functional_class === 'Expiratory');
+        }} else if (filterType === 'tonic') {{
+            document.getElementById('filterTonic').classList.add('btn-active');
+            filteredUnits = manifest.filter(u => u.functional_class === 'Tonic');
+        }}
+        populateDropdown();
+    }}
 
-        window.onload = populateSelector;
+    window.addEventListener('keydown', (e) => {{
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+        if (e.key === 'ArrowRight' || e.key === 'k' || e.key === 'K') {{
+            nextUnit();
+        }} else if (e.key === 'ArrowLeft' || e.key === 'j' || e.key === 'J') {{
+            prevUnit();
+        }}
+    }});
+
+    populateDropdown();
     </script>
 </body>
 </html>
 """
-    output_path.write_text(html_content, encoding="utf-8")
+    output_path.write_text(browser_html, encoding="utf-8")
     return output_path
