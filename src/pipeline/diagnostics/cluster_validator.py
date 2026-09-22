@@ -759,17 +759,18 @@ def extract_representative_trace_snippet(
     spike_times_s: np.ndarray,
     peak_channel: int,
     t_start_s: Optional[float] = None,
-    window_duration_s: float = 60.0,
+    window_duration_s: float = 1.5,
     fs: float = 30000.0,
     refractory_ms: float = 1.0,
-    max_display_pts_per_chan: int = 40000,
+    max_display_pts_per_chan: int = 100000,
     ds_factor: int = 1
 ) -> MultiChannelTraceSnippet:
     """
-    Extracts and bandpass filters (300-6000 Hz zero-phase) multi-channel voltage traces
-    across the entire recording window (default 60s). Uses peak-preserving min-max decimation
-    to ensure 100% action potential trough fidelity without file bloat. Pins all refractory
-    period violations (< refractory_ms) directly onto the voltage trace.
+    Extracts and bandpass filters (300-6000 Hz zero-phase) multi-channel voltage traces.
+    By default extracts a pristine 1.5s window at native 30 kHz sampling rate (zero decimation)
+    centered on the highest firing rate burst epoch, preserving 100% of raw spike waveform fidelity.
+    Pins detected spike troughs (red) and any refractory period violations (< refractory_ms, amber)
+    directly onto the voltage trace.
     """
     n_total_samples = mm_ap.shape[0]
 

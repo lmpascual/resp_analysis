@@ -118,7 +118,7 @@ def main():
         help="Destination directory for validation dashboards."
     )
     parser.add_argument(
-        "--time-window", type=float, default=60.0,
+        "--time-window", type=float, default=1.5,
         help="Duration of representative multi-channel trace snippet (s, default: 1.5s)."
     )
     parser.add_argument(
@@ -267,17 +267,20 @@ def main():
 
         true_depth_um = float(channel_depths.get(peak_chan, (peak_chan // 2) * 15.0))
 
-        # Extract representative multi-channel trace snippet with exact trough alignment
+        # Extract representative multi-channel trace snippet (1.5s native 30 kHz burst snippet, zero downsampling)
+        # If time_window <= 5.0s, pass t_start_s=None to automatically find the highest firing rate burst window!
+        snip_t_start = None if args.time_window <= 5.0 else time_offset_s
         snippet = extract_representative_trace_snippet(
             mm_ap=mm_ap,
             channels=footprint_chans,
             channel_depths=channel_depths,
             spike_times_s=u_abs_times,
             peak_channel=peak_chan,
-            t_start_s=time_offset_s,
+            t_start_s=snip_t_start,
             window_duration_s=args.time_window,
             fs=fs_ap,
-            refractory_ms=1.0
+            refractory_ms=1.0,
+            max_display_pts_per_chan=100000
         )
         # Shift snippet time axis to relative coordinates for display
         snippet.t_axis_s -= time_offset_s

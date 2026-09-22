@@ -36,8 +36,8 @@ def build_unit_validation_figure(bundle: UnitValidationBundle) -> go.Figure:
             [{"type": "xy"}, {"type": "xy"}]              # Row 4: Autocorrelogram & Template Waveforms
         ],
         subplot_titles=(
-            f"<b>1. Multi-Channel Footprint Traces (Full 60s Window, 300-6000 Hz)</b> & Spikes (Ch {bundle.peak_channel}) | Red: Spikes &bull; Amber: ISI Violations (&lt;{bundle.isi.refractory_ms:.1f}ms)",
-            f"<b>2. ISI Distribution</b> (Refractory Threshold: 1.5 ms)",
+            f"<b>1. Multi-Channel Action Potential Footprint (1.5s Burst Snippet @ 30 kHz Native, Zero Downsampling)</b> &bull; Ch {bundle.peak_channel} [PEAK] | Red: Spikes &bull; Amber: ISI Violations (&lt;{bundle.isi.refractory_ms:.1f}ms)",
+            f"<b>2. ISI Distribution</b> (Refractory Threshold: {bundle.isi.refractory_ms:.1f} ms)",
             f"<b>4. Respiratory Phase Rose Plot & Vector</b> ({bundle.respiratory_phase.landmark_provenance})",
             f"<b>3A. Amplitude Stationarity Over Session</b> (Drift: {bundle.stationarity.drift_slope_uv_per_min} uV/min)",
             f"<b>3B. Time-Resolved Unsmoothed ISI CDFs</b> (5 Epochs, Log Scale)",
@@ -283,10 +283,10 @@ def build_unit_validation_figure(bundle: UnitValidationBundle) -> go.Figure:
             
         fig.add_trace(
             go.Scatter(
-                x=[1.5, 1.5], y=[0.0, 1.0],
+                x=[bundle.isi.refractory_ms, bundle.isi.refractory_ms], y=[0.0, 1.0],
                 mode="lines",
                 line=dict(color="#ef4444", dash="dash", width=1.5),
-                name="1.5ms Refractory Threshold",
+                name=f"{bundle.isi.refractory_ms:.1f}ms Refractory Threshold",
                 hoverinfo="name"
             ),
             row=3, col=2
@@ -374,6 +374,9 @@ def generate_single_unit_html(bundle: UnitValidationBundle, output_path: Path) -
     rp = bundle.respiratory_phase
     isi = bundle.isi
     wf = bundle.waveform
+    snip = bundle.trace_snippet
+    snip_t0 = snip.t_start_s if snip else 0.0
+    snip_t1 = snip.t_end_s if snip else 1.5
 
     qc_badge = (
         '<span style="background-color:#10b981;color:#ffffff;padding:4px 10px;border-radius:12px;font-weight:600;font-size:0.85rem;">PASS (Allen QC)</span>'
@@ -500,6 +503,29 @@ def generate_single_unit_html(bundle: UnitValidationBundle, output_path: Path) -
             <div class="metric-item">
                 <span class="metric-label">Action Potential Kinetics</span>
                 <span class="metric-val">{wf.trough_to_peak_us:.0f} &mu;s ({wf.putative_cell_type.split()[0]})</span>
+            </div>
+        </div>
+
+        <div style="background:#f8fafc;border:1px solid #cbd5e1;border-left:4px solid #3b82f6;border-radius:8px;padding:14px 18px;margin-bottom:20px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                <span style="font-weight:700;font-size:0.95rem;color:#1e293b;">
+                    🔬 High-Resolution Trace Inspector (Native 30 kHz, Zero Downsampling)
+                </span>
+                <span style="font-size:0.82rem;background:#e2e8f0;padding:4px 10px;border-radius:6px;color:#334155;font-weight:600;">
+                    Snippet: {snip_t0:.2f}s &ndash; {snip_t1:.2f}s (1.5s @ 30,000 pts/sec)
+                </span>
+            </div>
+            <div style="font-size:0.86rem;color:#475569;margin-bottom:10px;line-height:1.5;">
+                Panel 1 displays raw bandpass-filtered (300&ndash;6000 Hz) traces with exact action potential trough snapping and ISI refractory violation markers (&lt; {isi.refractory_ms:.1f} ms).<br>
+                <strong>Full Session Refractory Violations:</strong>
+                {'<span style="color:#10b981;font-weight:600;">0 Violations (Clean single-unit isolation, Q = 0.000)</span>' if isi.n_violations == 0 else f'<span style="color:#d97706;font-weight:600;">{isi.n_violations} Violations (&lt; {isi.refractory_ms:.1f} ms, Q = {isi.violation_rate_q:.3f})</span>'}
+            </div>
+            <div style="font-size:0.82rem;color:#64748b;margin-bottom:6px;font-weight:600;">
+                ⚡ Generate Custom Window or Jump to Violations (Calculates single cluster on-demand in &lt;1.5s):
+            </div>
+            <div style="background:#0f172a;color:#e2e8f0;border-radius:6px;padding:9px 14px;font-family:Consolas, Monaco, monospace;font-size:0.82rem;display:flex;justify-content:space-between;align-items:center;">
+                <span id="cliCmd">python scripts/visualization/generate_cluster_trace_window.py --output-dir outputs/LP21/LP21_fent_EXPT_g1_60s_120s_lupin_run --unit {bundle.cluster_id} {'--violation 1' if isi.n_violations > 0 else f'--t-start {max(0.0, snip_t0):.1f} --duration 3.0'} --open</span>
+                <button onclick="navigator.clipboard.writeText(document.getElementById('cliCmd').innerText); this.innerText='Copied!'; setTimeout(() => this.innerText='Copy Command', 2000);" style="background:#2563eb;border:none;color:#ffffff;padding:5px 12px;border-radius:4px;cursor:pointer;font-size:0.75rem;font-weight:600;margin-left:14px;white-space:nowrap;">Copy Command</button>
             </div>
         </div>
 
