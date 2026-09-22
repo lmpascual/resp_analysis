@@ -337,7 +337,7 @@ def main():
     print(f"Unit {uid:04d} (Peak Ch {peak_chan}): {len(u_spk_times)} total spikes | {len(violations)} refractory violations (<{args.refractory_ms:.1f}ms)")
 
     # Determine destination directory
-    custom_dir = out_dir / "phy_validation_suite" / "custom_traces"
+    custom_dir = out_dir / "sorting_validation" / "custom_traces"
     custom_dir.mkdir(parents=True, exist_ok=True)
 
     # Handle Mode 2: Center on Specific Violation

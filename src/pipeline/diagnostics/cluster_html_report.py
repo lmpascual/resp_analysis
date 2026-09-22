@@ -389,7 +389,7 @@ def generate_single_unit_html(bundle: UnitValidationBundle, output_path: Path) -
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Unit {bundle.cluster_id:04d} Validation Suite | Phy-Like Inspector</title>
+    <title>Unit {bundle.cluster_id:04d} Validation Suite | Sorting Validation Inspector</title>
     <style>
         body {{
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -587,7 +587,7 @@ def generate_multi_cluster_browser_html(
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Phy-Like Multi-Cluster Validation Browser</title>
+    <title>Sorting Validation Browser</title>
     <style>
         body {{
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -671,7 +671,7 @@ def generate_multi_cluster_browser_html(
     <div class="browser-container">
         <div class="top-bar">
             <div>
-                <h2 style="margin:0;font-size:1.35rem;color:#38bdf8;">Phy-Like Cluster Validation Browser</h2>
+                <h2 style="margin:0;font-size:1.35rem;color:#38bdf8;">Spike Sorting Validation Browser</h2>
                 <div style="color:#94a3b8;font-size:0.85rem;margin-top:4px;">
                     Fast on-demand navigation &bull; Keys: <strong>[J/K]</strong> or <strong>[&larr;/&rarr;]</strong>
                 </div>

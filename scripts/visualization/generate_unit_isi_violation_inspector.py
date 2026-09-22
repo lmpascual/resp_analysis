@@ -584,7 +584,7 @@ def main():
     args = parser.parse_args()
 
     out_dir = args.output_dir
-    dest_file = args.dest_file or (out_dir / "phy_validation_suite" / f"unit_{args.unit_id:04d}_isi_violation_diagnostic.html")
+    dest_file = args.dest_file or (out_dir / "sorting_validation" / f"unit_{args.unit_id:04d}_isi_violation_diagnostic.html")
 
     alf_dir = out_dir / "00_spike_sorting_data" / "alf"
     if not alf_dir.exists():

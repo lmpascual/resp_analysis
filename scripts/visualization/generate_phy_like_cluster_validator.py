@@ -129,14 +129,14 @@ def main():
     args = parser.parse_args()
 
     out_dir = args.output_dir
-    dest_dir = args.dest_dir or (out_dir / "phy_validation_suite")
+    dest_dir = args.dest_dir or (out_dir / "sorting_validation")
     dest_dir.mkdir(parents=True, exist_ok=True)
     units_dir = dest_dir / "units"
     if args.individual_pages:
         units_dir.mkdir(parents=True, exist_ok=True)
 
     print("=" * 80)
-    print(" INTERACTIVE PHY-LIKE CLUSTER VALIDATION SUITE")
+    print(" INTERACTIVE SPIKE SORTING VALIDATION SUITE")
     print(f" Source Directory: {out_dir}")
     print(f" Output Directory: {dest_dir}")
     print(f" Inspiration Offset Landmark: {args.insp_offset_source.upper()}")
@@ -383,8 +383,8 @@ def main():
   * **Inspiration Onset ($0^\circ$)**: Diaphragm EMG Burst Onset (NIDQ Ch 0)
   * **Inspiration Offset ($180^\circ$)**: {landmark_prov}
 - **Outputs**:
-  * Unified Interactive Browser: `phy_validation_suite/cluster_validation_browser.html`
-  * Individual Deep-Dive Pages: `phy_validation_suite/units/`
+  * Unified Interactive Browser: `sorting_validation/cluster_validation_browser.html`
+  * Individual Deep-Dive Pages: `sorting_validation/units/`
 """
     if journal_path.exists():
         with open(journal_path, "a", encoding="utf-8") as jf:
