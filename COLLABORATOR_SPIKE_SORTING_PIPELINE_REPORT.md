@@ -119,7 +119,7 @@ Every parameter in the pipeline is explicit, inspectable, and overrideable via i
 ### Stage 6: Quality Control (Allen Institute for Neural Dynamics & IBL Standards)
 | Quality Metric | SUA Passing Threshold | Unit | Failure Mode Detected / Rationale |
 | :--- | :--- | :--- | :--- |
-| `isi_violation_rate` | `< 0.005` ($< 0.5\%$) | Ratio | Refractory period violations ($< 1.5\,\text{ms}$). Detects multi-unit contamination or false merged clusters. |
+| `isi_violation_rate` | `< 0.005` ($< 0.5\%$) | Ratio | Refractory period violations ($< 1.0\,\text{ms}$). Detects multi-unit contamination or false merged clusters. |
 | `amplitude_cutoff` | `< 0.10` ($< 10\%$) | Ratio | Quantifies missing spikes due to detection threshold using a Gaussian tail fit. $> 10\%$ indicates severe spike dropout. |
 | `presence_ratio` | `> 0.90` ($> 90\%$) | Ratio | Detects severe physical unit drift out of electrode recording sphere or intermittent recording silencing. |
 | `snr` | `> 2.5` | Ratio | Peak-to-peak waveform amplitude relative to background noise MAD. |
@@ -216,7 +216,7 @@ graph TD
     
     J["Spike Times & Clusters (ALF)"] --> K["Map Spikes to Phase & Intervals"]
     D & K --> L["Panel 1: Multi-Channel Filtered Traces (6-8 ch) + Spike Overlays"]
-    K --> M["Panel 2: ISI Distribution + Refractory Cutoff (1.5 ms)"]
+    K --> M["Panel 2: ISI Distribution + Refractory Cutoff (1.0 ms)"]
     K --> N["Panel 3A: Amplitude Stationarity Scatter + Rolling Trend"]
     K --> O["Panel 3B: Time-Resolved Unsmoothed ISI CDFs (5 Epochs, Log Scale)"]
     I & K --> P["Panel 4: Circular Rose Plot + Respiratory Phase Vector (r, theta)"]
@@ -232,7 +232,7 @@ graph TD
    - Vertically stacks channel voltage traces with physical depth spacing ($\mu\text{m}$) and overlays prominent highlighted markers (crimson circles) precisely on detected spike peaks/troughs.
 2. **Inter-Spike Interval (ISI) Distribution & Violations**:
    - Fine-binned histogram ($0.5\,\text{ms}$ bins) up to $100\,\text{ms}$.
-   - Vertical dashed threshold at refractory limit ($\tau_{\text{ref}} = 1.5\,\text{ms}$).
+   - Vertical dashed threshold at refractory limit ($\tau_{\text{ref}} = 1.0\,\text{ms}$).
    - Computes the Allen Institute / IBL refractory contamination rate:
      $$Q_{\text{ISI}} = \frac{N_{\text{viol}} \cdot T}{2 \cdot \tau_{\text{ref}} \cdot N_{\text{spikes}}^2}, \quad \%_{\text{viol}} = \frac{N_{\text{viol}}}{N_{\text{spikes}}} \times 100\%$$
    - Units pass Allen QC when $Q_{\text{ISI}} \le 0.50$ (strict pass: $Q_{\text{ISI}} \le 0.10$).
