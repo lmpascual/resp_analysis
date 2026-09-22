@@ -147,6 +147,7 @@ class UnitValidationBundle:
     waveform: WaveformKineticsResult
     amplitude_cutoff: AmplitudeCutoffResult
     trace_snippet: Optional[MultiChannelTraceSnippet] = None
+    qc_summary: str = ""
 
 
 def detect_respiratory_landmarks(

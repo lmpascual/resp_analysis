@@ -191,6 +191,9 @@ def run_lupin_sorting(
     sc2_params['templates_from_svd'] = config.templates_from_svd
     sc2_params['clustering']['method'] = config.clustering_method
     sc2_params['matching']['method'] = config.matching_method
+    sc2_params['matching']['method_kwargs'] = {
+        'amplitudes': list(config.matching_amplitudes)
+    }
     sc2_params['job_kwargs'] = {'n_jobs': n_jobs}
 
     t0 = time.time()

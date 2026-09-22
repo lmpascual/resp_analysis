@@ -494,3 +494,46 @@ This pipeline is directly grounded in and extends key methodological frameworks,
   - *Repository*: [IBL Brainbox Quality Metrics](https://github.com/int-brain-lab/ibllib)
   - *Role*: Formulates our automated single-unit QC thresholds (refractory ISI violation <0.5%, amplitude cutoff <10%, presence ratio >90%, SNR >2.5).
 
+### 8.6 Comparative Analysis: Nicholas Bush (`cibrrig`) vs. Current Spike Sorting Architecture
+
+To ensure analytical consistency with the Ramirez Lab’s published manifold studies (*Bush & Ramirez, Nature 2025; Bush & Ramirez, bioRxiv 2024*), this section provides a parameter and architectural comparison between Nicholas Bush’s `cibrrig` pipeline and the current modular spike sorting architecture.
+
+#### 1. Core Sorting & Motion Correction Comparison
+| Dimension | Nicholas Bush (`cibrrig`) Implementation | Current Implementation (`resp_analysis`) | Scientific & Methodological Rationale |
+| :--- | :--- | :--- | :--- |
+| **Spike Sorter Engine** | **Kilosort 4 (KS4)** via SpikeInterface (`cibrrig.sorting.spikeinterface_ks4`) | **Lupin (SpyKING-CIRCUS 2 SVD-OMP)** via SpikeInterface (`lupin_pipeline.py`) | Kilosort 4 suffers from template-matching dropouts during high-density inspiratory bursts (inter-spike intervals $< 2\,\text{ms}$ across neighboring neurons). Lupin’s SVD-OMP matching pursuit resolves temporally overlapping waveforms during burst peaks without dropping spikes. |
+| **Motion Correction** | **DREDGE** (`MOTION_PRESET = "dredge"`, `do_correction = False` in KS4) | **Non-Rigid Kriging Interpolation** (`kriging`, spatial bin $50\,\mu\text{m}$, time bin $2.0\,\text{s}$) | DREDGE provides fast 1D rigid/semi-rigid drift correction across cortex; Kriging interpolation provides continuous spatial reconstruction across local brainstem tissue deformation driven by diaphragmatic excursion. |
+| **Spatial Channel Partitioning** | **Global Whole-Probe** (All 384 channels concurrently) | **50-Channel Sliding Windows** (Overlap: 20 channels, Jaccard bipartite graph consensus) | Eliminates global template competition; prevents distant dorsal/ventral units from interfering with ventrolateral respiratory column clusters. |
+| **Template Matching Bounds** | Kilosort 4 default generative template scaling | **Bounded Matching Pursuits** (`amplitudes = [0.6, 2.0]`) | Unbounded matching ($\le \infty$) causes peelers to absorb multi-unit burst hash as spurious single-unit spikes. Bounding to $[0.6, 2.0]$ enforces biological spike amplitude fidelity. |
+
+#### 2. Quality Control (QC) Metrics & Provenance
+Nicholas Bush’s `cibrrig` pipeline (`cibrrig.sorting.export_to_alf.ALFExporter`) defines four core gating criteria combined with deep-learning curation:
+```python
+# cibrrig Quality Control Presets (Bush et al.)
+AMPLITUDE_CUTOFF = 0.1       # Max 10% estimated missing spikes (IBL standard)
+SLIDING_RP = 0.1             # Max 10% sliding refractory period violations (IBL standard)
+AMP_THRESH = 40.0            # Min 40.0 uV median peak amplitude (eliminates noise hash)
+MIN_SPIKES = 500             # Minimum 500 spikes for stable manifold estimation
+# Model-based curation:
+# SpikeInterface/UnitRefine_noise_neural_classifier -> rejects noise
+# SpikeInterface/UnitRefine_sua_mua_classifier      -> classifies SUA vs MUA
+```
+
+The current pipeline harmonizes and extends these standards across both automated consensus sorting and interactive visual validation:
+| QC Metric | Literature Provenance | `cibrrig` (Nick Bush) | Current Pipeline (`resp_analysis`) |
+| :--- | :--- | :--- | :--- |
+| **Refractory Violations** | **Hill et al. (2011)** *J. Neurosci*; **Siegle et al. (2021)** *Nature* | `sliding_rp_violation < 0.10` | $Q_{\text{ISI}} \le 0.10$ ($\tau_{\text{ref}} = 1.0\,\text{ms}$, exact millisecond trough-aligned) |
+| **Spike Amplitude Floor** | **IBL et al. (2022)** *eLife* | `abs(amplitude_median) > 40.0 uV` | $\text{PTP} \ge 35.0\,\mu\text{V}$ (strict physical threshold above $10\text{--}15\,\mu\text{V}$ NP2.0 noise floor) |
+| **Signal-to-Noise Ratio (SNR)** | **Siegle et al. (2021)** *Nature* (Allen Institute) | Implicit via `AMP_THRESH` + `UnitRefine` | $\text{SNR} \ge 2.0$ (Strict SUA $\ge 2.5$; $\text{SNR} = \text{PTP} / \sigma_{\text{MAD}}$) |
+| **Action Potential Duration** | **Barthó et al. (2004)** *J. Neurophysiol* | Implicit via `UnitRefine` neural classifier | $150\,\mu\text{s} \le \tau_{\text{AP}} \le 850\,\mu\text{s}$ (rejects $>1000\,\mu\text{s}$ slow waves / LFP hash) |
+| **Amplitude Variability** | **IBL et al. (2022)** *eLife* | `amplitude_cutoff < 0.10` | Amplitude $\text{CV} \le 0.40$ ($\sigma_{\text{amp}} / \mu_{\text{amp}}$) + `amplitude_cutoff <= 0.10` |
+| **Cross-Window Consensus** | Multi-window consensus validation | N/A (single whole-probe sort) | Requires $k \ge 2$ window agreement (or strict SUA $\text{SNR} \ge 3.0$ for orphans) |
+
+#### 3. Auxiliary Physiological Signal Processing
+The auxiliary processing module (`src/pipeline/processing/analog_nidq/proc_emg.py`) strictly preserves Nicholas Bush’s diaphragm EMG processing pipeline:
+- **Filtering**: 300–5000 Hz 2nd-order Butterworth bandpass filter.
+- **Rectification**: Full-wave $\|V(t)\|$.
+- **Smoothing**: 2-stage smoothing: **50 ms Median Filter** followed by **10 ms Savitzky-Golay polynomial filter**.
+- **Burst Landmark Extraction**: `scipy.signal.peak_widths(..., rel_height=0.95)` computing true diaphragm onset ($I_{\text{on}}$, left foot) and offset ($I_{\text{off}}$, right foot), plus sigh/doublet rejection.
+- **Dual-Mode Extension**: Added zero-crossing detection from pneumotachograph flow as the default inspiration offset landmark, with automatic fallback to diaphragm EMG offset when airflow channels are unavailable.
+

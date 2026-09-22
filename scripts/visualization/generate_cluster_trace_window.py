@@ -178,6 +178,12 @@ def build_window_figure(
     traces = window_data["filt_traces"]
     t_axis = window_data["t_full"] - time_offset_s
 
+    # Dynamic channel min/max examination
+    ch_ptps = [float(np.ptp(traces[i])) for i in range(len(channels))]
+    max_ptp = max(ch_ptps) if len(ch_ptps) > 0 else 60.0
+    max_ptp = max(max_ptp, 30.0)
+    trace_spacing_uv = float(max_ptp / 0.70)
+
     chan_depth_pairs = [(ch, depths[i], i) for i, ch in enumerate(channels)]
     chan_depth_pairs.sort(key=lambda x: x[1])
 
@@ -187,8 +193,7 @@ def build_window_figure(
     peak_y_base = 0.0
     for plot_idx, (ch, d_um, orig_idx) in enumerate(chan_depth_pairs):
         y_base = offsets[plot_idx]
-        default_gain = 2.5
-        y_tr = default_gain * traces[orig_idx] + y_base
+        y_tr = traces[orig_idx] + y_base
         is_peak = (ch == peak_chan)
         if is_peak:
             peak_y_base = y_base
@@ -207,7 +212,7 @@ def build_window_figure(
     # Overlay normal spikes
     if len(window_data["spikes_t"]) > 0:
         spk_t = window_data["spikes_t"] - time_offset_s
-        spk_y = 2.5 * window_data["spikes_v"] + peak_y_base
+        spk_y = window_data["spikes_v"] + peak_y_base
         fig.add_trace(
             go.Scatter(
                 x=spk_t,
@@ -222,7 +227,7 @@ def build_window_figure(
     # Overlay refractory violations (< refractory_ms)
     if len(window_data["viol_t"]) > 0:
         viol_t = window_data["viol_t"] - time_offset_s
-        viol_y = 2.5 * window_data["viol_v"] + peak_y_base
+        viol_y = window_data["viol_v"] + peak_y_base
         fig.add_trace(
             go.Scatter(
                 x=viol_t,
@@ -249,7 +254,8 @@ def build_window_figure(
             f"<b>Ch {ch}</b> ({d_um:.0f}um){'<br>[PEAK]' if ch == peak_chan else ''}"
             for ch, d_um, _ in chan_depth_pairs
         ],
-        title_text="Electrode Contacts"
+        title_text="Electrode Contacts",
+        range=[-trace_spacing_uv * 0.5, (len(channels) - 0.5) * trace_spacing_uv]
     )
     fig.update_xaxes(title_text="Recording Time (s)")
     return fig

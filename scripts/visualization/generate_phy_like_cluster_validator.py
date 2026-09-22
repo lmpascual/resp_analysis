@@ -333,6 +333,27 @@ def main():
             noise_sigma=12.0
         )
 
+        # Comprehensive Single-Unit Biophysical QC Evaluation (Allen / IBL / cibrrig standards)
+        qc_reasons = []
+        if wf_res.snr < 2.0:
+            qc_reasons.append(f"SNR={wf_res.snr:.2f}<2.0")
+        ptp_val = channel_ptps.get(peak_chan, 0.0)
+        if ptp_val < 35.0:
+            qc_reasons.append(f"PTP={ptp_val:.1f}uV<35uV")
+        if wf_res.trough_to_peak_us < 150.0 or wf_res.trough_to_peak_us > 850.0:
+            qc_reasons.append(f"AP Dur={wf_res.trough_to_peak_us:.0f}us")
+        if isi_res.violation_rate_q > 0.10:
+            qc_reasons.append(f"ISI Q={isi_res.violation_rate_q:.3f}>0.10")
+        if st_res.coefficient_of_variation > 0.40:
+            qc_reasons.append(f"Amp CV={st_res.coefficient_of_variation:.2f}>0.40")
+
+        is_consensus = bool(row.get("is_cross_window_consensus", True))
+        if not is_consensus and wf_res.snr < 3.0:
+            qc_reasons.append("Orphan Cluster")
+
+        passed_qc = (len(qc_reasons) == 0)
+        qc_summary = ", ".join(qc_reasons) if qc_reasons else "Allen SUA Pass"
+
         bundle = UnitValidationBundle(
             cluster_id=uid,
             firing_rate_hz=fr,
@@ -349,7 +370,8 @@ def main():
             acg=acg_res,
             waveform=wf_res,
             amplitude_cutoff=cutoff_res,
-            trace_snippet=snippet
+            trace_snippet=snippet,
+            qc_summary=qc_summary
         )
         bundles.append(bundle)
 

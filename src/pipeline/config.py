@@ -85,6 +85,7 @@ class LupinConfig:
     ms_before: float = 1.5
     ms_after: float = 2.0
     templates_from_svd: bool = True
+    matching_amplitudes: List[float] = field(default_factory=lambda: [0.6, 2.0])
 
 @dataclass
 class SlidingWindowConfig:
