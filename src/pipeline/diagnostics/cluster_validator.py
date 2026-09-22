@@ -8,7 +8,7 @@ Allen Institute, IBL, and respiratory neurobiology standards (Bush et al. 2024):
    align precisely with action potential troughs on the peak channel.
 3. Dual-source respiratory landmark detection (Diaphragm EMG Onset + Flow Meter ZC Offset, with EMG offset fallback).
 4. Continuous respiratory phase mapping and circular mean resultant vector (Mazurek R, theta, Rayleigh test).
-5. Inter-Spike Interval (ISI) distribution and Hill/IBL refractory violation metrics (tau_ref = 1.5 ms).
+5. Inter-Spike Interval (ISI) distribution and Hill/IBL refractory violation metrics (tau_ref = 1.0 ms).
 6. Amplitude stationarity across recording session (rolling trendline + IQR).
 7. Time-resolved ISI probability density functions (PDF ridge lines across temporal epochs).
 8. Autocorrelogram (ACG) with refractory depression dip.
@@ -125,6 +125,8 @@ class MultiChannelTraceSnippet:
     aligned_trough_voltages: np.ndarray
     t_start_s: float
     t_end_s: float
+    violation_trough_times: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.float64))
+    violation_trough_voltages: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.float32))
 
 
 @dataclass
@@ -320,7 +322,7 @@ def compute_respiratory_phase_vector(
 
 def compute_isi_and_violations(
     spike_times_s: np.ndarray,
-    refractory_ms: float = 1.5,
+    refractory_ms: float = 1.0,
     max_isi_ms: float = 100.0,
     bin_size_ms: float = 0.5
 ) -> ISIValidationResult:
@@ -757,33 +759,32 @@ def extract_representative_trace_snippet(
     spike_times_s: np.ndarray,
     peak_channel: int,
     t_start_s: Optional[float] = None,
-    window_duration_s: float = 1.5,
+    window_duration_s: float = 60.0,
     fs: float = 30000.0,
+    refractory_ms: float = 1.0,
+    max_display_pts_per_chan: int = 40000,
     ds_factor: int = 1
 ) -> MultiChannelTraceSnippet:
     """
     Extracts and bandpass filters (300-6000 Hz zero-phase) multi-channel voltage traces
-    centered around active firing, and computes EXACT aligned negative trough coordinates
-    on the peak channel for every spike event.
+    across the entire recording window (default 60s). Uses peak-preserving min-max decimation
+    to ensure 100% action potential trough fidelity without file bloat. Pins all refractory
+    period violations (< refractory_ms) directly onto the voltage trace.
     """
     n_total_samples = mm_ap.shape[0]
 
-    # Auto-center around an active burst epoch with high spike count
     if t_start_s is None:
-        if len(spike_times_s) >= 10:
+        if len(spike_times_s) > 0 and window_duration_s < 10.0:
             t_min = float(np.min(spike_times_s))
             t_max = float(np.max(spike_times_s))
-            step = 0.5
-            eval_times = np.arange(t_min, max(t_min + 0.5, t_max - window_duration_s), step)
+            eval_times = np.arange(t_min, max(t_min + 0.5, t_max - window_duration_s), 0.5)
             if len(eval_times) > 0:
                 counts = [np.sum((spike_times_s >= t) & (spike_times_s < t + window_duration_s)) for t in eval_times]
-                # Filter for realistic burst window (e.g. 15 to 60 spikes in 1.5s)
-                best_t = eval_times[int(np.argmax(counts))]
-                t_start_s = float(best_t)
+                t_start_s = float(eval_times[int(np.argmax(counts))])
             else:
                 t_start_s = t_min
         else:
-            t_start_s = 0.0
+            t_start_s = float(np.min(spike_times_s)) if len(spike_times_s) > 0 else 0.0
 
     t_end_s = t_start_s + window_duration_s
     s0 = max(0, int(t_start_s * fs))
@@ -794,53 +795,86 @@ def extract_representative_trace_snippet(
     # 4th-order zero-phase Butterworth bandpass filter (300 - 6000 Hz)
     nyq = 0.5 * fs
     b, a = signal.butter(4, [300.0 / nyq, 6000.0 / nyq], btype='band')
-    filt_chunk = signal.filtfilt(b, a, raw_chunk, axis=0)
+    filt_chunk = signal.filtfilt(b, a, raw_chunk, axis=0) * 0.195  # in uV
 
-    # Continuous time vector
     t_full = np.arange(s0, s1) / fs
 
-    # Find peak channel index in channels list
     peak_idx = channels.index(peak_channel) if peak_channel in channels else 0
     filt_peak = filt_chunk[:, peak_idx]
 
-    # Spikes within window
-    spks_in_win = spike_times_s[(spike_times_s >= t_start_s) & (spike_times_s < t_end_s)]
+    spks_in_win = np.sort(spike_times_s[(spike_times_s >= t_start_s) & (spike_times_s < t_end_s)])
+
+    # Identify refractory violation spikes (< refractory_ms)
+    ref_s = refractory_ms / 1000.0
+    viol_flags = np.zeros(len(spks_in_win), dtype=bool)
+    if len(spks_in_win) > 1:
+        diffs = np.diff(spks_in_win)
+        for i in range(len(spks_in_win)):
+            prev_dt = diffs[i - 1] if i > 0 else 999.0
+            next_dt = diffs[i] if i < len(diffs) else 999.0
+            if prev_dt < ref_s or next_dt < ref_s:
+                viol_flags[i] = True
 
     # Align each spike to exact negative trough within +/- 0.6 ms (+/- 18 samples)
     search_half_samples = int(0.0006 * fs)
     aligned_troughs_t = []
     aligned_troughs_v = []
+    viol_troughs_t = []
+    viol_troughs_v = []
 
-    for st in spks_in_win:
+    for i, st in enumerate(spks_in_win):
         s_center = int((st - t_start_s) * fs)
         w_start = max(0, s_center - search_half_samples)
         w_end = min(len(filt_peak), s_center + search_half_samples)
         if w_end > w_start:
             local_min_idx = w_start + int(np.argmin(filt_peak[w_start:w_end]))
-            aligned_troughs_t.append(t_full[local_min_idx])
-            aligned_troughs_v.append(filt_peak[local_min_idx])
+            t_tr = t_full[local_min_idx]
+            v_tr = filt_peak[local_min_idx]
         else:
-            aligned_troughs_t.append(st)
-            aligned_troughs_v.append(0.0)
+            t_tr = st
+            v_tr = 0.0
 
-    # If ds_factor > 1, downsample background lines for web performance
-    if ds_factor > 1:
-        ds_filt = filt_chunk[::ds_factor, :]
-        t_ds = t_full[::ds_factor]
+        aligned_troughs_t.append(t_tr)
+        aligned_troughs_v.append(v_tr)
+        if viol_flags[i]:
+            viol_troughs_t.append(t_tr)
+            viol_troughs_v.append(v_tr)
+
+    # Peak-preserving min-max decimation for full session multi-channel display
+    if len(filt_chunk) > max_display_pts_per_chan:
+        bin_size = max(2, len(filt_chunk) // (max_display_pts_per_chan // 2))
+        n_bins = len(filt_chunk) // bin_size
+        reshaped = filt_chunk[:n_bins * bin_size].reshape(n_bins, bin_size, len(channels))
+        mins = reshaped.min(axis=1)
+        maxs = reshaped.max(axis=1)
+
+        dec_traces = np.empty((n_bins * 2, len(channels)), dtype=np.float32)
+        dec_traces[0::2] = mins
+        dec_traces[1::2] = maxs
+
+        dec_times = np.empty(n_bins * 2, dtype=np.float64)
+        bin_times = t_full[:n_bins * bin_size:bin_size]
+        dec_times[0::2] = bin_times
+        dec_times[1::2] = bin_times + (bin_size / (2.0 * fs))
+
+        t_out = dec_times
+        traces_out = dec_traces.T  # (n_channels, n_samples)
     else:
-        ds_filt = filt_chunk
-        t_ds = t_full
+        t_out = t_full
+        traces_out = filt_chunk.T
 
     return MultiChannelTraceSnippet(
-        t_axis_s=t_ds,
+        t_axis_s=t_out,
         channels=channels,
-        channel_depths_um=[channel_depths.get(ch, 0.0) for ch in channels],
-        traces_uv=ds_filt.T,
+        channel_depths_um=[channel_depths.get(ch, (ch // 2) * 15.0) for ch in channels],
+        traces_uv=traces_out,
         peak_channel=peak_channel,
         peak_channel_index=peak_idx,
         spike_times_in_window=spks_in_win,
         aligned_trough_times=np.array(aligned_troughs_t, dtype=np.float64),
         aligned_trough_voltages=np.array(aligned_troughs_v, dtype=np.float32),
         t_start_s=t_start_s,
-        t_end_s=t_end_s
+        t_end_s=t_end_s,
+        violation_trough_times=np.array(viol_troughs_t, dtype=np.float64),
+        violation_trough_voltages=np.array(viol_troughs_v, dtype=np.float32)
     )

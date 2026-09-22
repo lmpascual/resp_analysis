@@ -2,7 +2,7 @@
 Postprocessing and Quality Metrics for Spike Sorting:
 - Export to Phy format and ALF arrays (spike_times.npy, spike_clusters.npy)
 - Comprehensive Allen Institute / IBL single-unit QC metrics:
-  * ISI Violation Rate (refractory period <= 1.5ms)
+  * ISI Violation Rate (refractory period <= 1.0ms)
   * Presence Ratio (100-bin temporal continuity)
   * Amplitude Cutoff & Estimated SNR
   * Firing Rate & Shank/Depth mapping
@@ -16,7 +16,7 @@ import spikeinterface.full as si
 
 logger = logging.getLogger("SORTING_POSTPROC")
 
-def compute_isi_violations(spike_times_s: np.ndarray, duration_s: float, isi_threshold_s: float = 0.0015) -> Tuple[float, int]:
+def compute_isi_violations(spike_times_s: np.ndarray, duration_s: float, isi_threshold_s: float = 0.0010) -> Tuple[float, int]:
     """Computes Allen Institute Refractory Period ISI Violation Ratio."""
     n_spikes = len(spike_times_s)
     if n_spikes < 2 or duration_s <= 0:

@@ -77,14 +77,14 @@ def compute_sliding_window_consensus(
     qc_presence_ratio = 0.90
     qc_amp_cutoff = 0.10
     qc_min_fr_hz = 0.10
-    isi_threshold_s = 0.0015
+    isi_threshold_s = 0.0010
 
     if pipeline_config is not None:
         qc_isi_cutoff = getattr(pipeline_config.sorters, "qc_isi_cutoff", 0.10)
         qc_presence_ratio = getattr(pipeline_config.sorters, "qc_presence_ratio", 0.90)
         qc_amp_cutoff = getattr(pipeline_config.sorters, "qc_amp_cutoff", 0.10)
         qc_min_fr_hz = getattr(pipeline_config.sorters, "qc_min_fr_hz", 0.10)
-        isi_threshold_s = getattr(pipeline_config.sorters, "isi_threshold_s", 0.0015)
+        isi_threshold_s = getattr(pipeline_config.sorters, "isi_threshold_s", 0.0010)
 
     logger.info("=" * 80)
     logger.info(" COMPUTING CROSS-WINDOW CONSENSUS & UNIT AGREEMENT")

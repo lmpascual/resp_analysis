@@ -36,7 +36,7 @@ def build_unit_validation_figure(bundle: UnitValidationBundle) -> go.Figure:
             [{"type": "xy"}, {"type": "xy"}]              # Row 4: Autocorrelogram & Template Waveforms
         ],
         subplot_titles=(
-            f"<b>1. Multi-Channel Filtered Footprint Traces (300-6000 Hz)</b> & Detected Spikes (Red Markers on Peak Ch {bundle.peak_channel})",
+            f"<b>1. Multi-Channel Footprint Traces (Full 60s Window, 300-6000 Hz)</b> & Spikes (Ch {bundle.peak_channel}) | Red: Spikes &bull; Amber: ISI Violations (&lt;{bundle.isi.refractory_ms:.1f}ms)",
             f"<b>2. ISI Distribution</b> (Refractory Threshold: 1.5 ms)",
             f"<b>4. Respiratory Phase Rose Plot & Vector</b> ({bundle.respiratory_phase.landmark_provenance})",
             f"<b>3A. Amplitude Stationarity Over Session</b> (Drift: {bundle.stationarity.drift_slope_uv_per_min} uV/min)",
@@ -96,12 +96,32 @@ def build_unit_validation_figure(bundle: UnitValidationBundle) -> go.Figure:
                     mode="markers",
                     marker=dict(
                         symbol="circle",
-                        size=8,
+                        size=6,
                         color="#ef4444",
-                        line=dict(color="#ffffff", width=1.0)
+                        line=dict(color="#ffffff", width=0.5)
                     ),
                     name=f"Detected Spikes (Ch {bundle.peak_channel})",
                     hoverinfo="x+y"
+                ),
+                row=1, col=1
+            )
+
+        # Highlight ISI Refractory Violations (< refractory_ms) with prominent warning triangles directly on the voltage trace!
+        if hasattr(snip, "violation_trough_times") and len(snip.violation_trough_times) > 0:
+            viol_y = snip.violation_trough_voltages + peak_y_base
+            fig.add_trace(
+                go.Scatter(
+                    x=snip.violation_trough_times,
+                    y=viol_y,
+                    mode="markers",
+                    marker=dict(
+                        symbol="triangle-down",
+                        size=11,
+                        color="#f59e0b",
+                        line=dict(color="#b45309", width=1.5)
+                    ),
+                    name=f"ISI Violations (&lt;{bundle.isi.refractory_ms:.1f}ms, N={len(snip.violation_trough_times)})",
+                    hoverinfo="x+y+name"
                 ),
                 row=1, col=1
             )
@@ -139,7 +159,7 @@ def build_unit_validation_figure(bundle: UnitValidationBundle) -> go.Figure:
     fig.add_vline(
         x=isi_res.refractory_ms,
         line=dict(color="#dc2626", width=2, dash="dash"),
-        annotation_text=f"Refractory Threshold: {isi_res.refractory_ms}ms",
+        annotation_text=f"Refractory Threshold: {isi_res.refractory_ms:.1f}ms",
         annotation_position="top right",
         row=2, col=1
     )

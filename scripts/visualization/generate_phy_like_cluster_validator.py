@@ -118,7 +118,7 @@ def main():
         help="Destination directory for validation dashboards."
     )
     parser.add_argument(
-        "--time-window", type=float, default=1.5,
+        "--time-window", type=float, default=60.0,
         help="Duration of representative multi-channel trace snippet (s, default: 1.5s)."
     )
     parser.add_argument(
@@ -274,15 +274,19 @@ def main():
             channel_depths=channel_depths,
             spike_times_s=u_abs_times,
             peak_channel=peak_chan,
-            t_start_s=None,
+            t_start_s=time_offset_s,
             window_duration_s=args.time_window,
             fs=fs_ap,
-            ds_factor=1  # Full resolution for pristine visual fidelity
+            refractory_ms=1.0
         )
         # Shift snippet time axis to relative coordinates for display
         snippet.t_axis_s -= time_offset_s
         snippet.spike_times_in_window -= time_offset_s
         snippet.aligned_trough_times -= time_offset_s
+        snippet.t_start_s -= time_offset_s
+        snippet.t_end_s -= time_offset_s
+        if len(snippet.violation_trough_times) > 0:
+            snippet.violation_trough_times -= time_offset_s
 
         # Compute respiratory phase vector
         rp_res = compute_respiratory_phase_vector(
@@ -295,7 +299,7 @@ def main():
         # Compute ISI distribution
         isi_res = compute_isi_and_violations(
             spike_times_s=u_spk_times,
-            refractory_ms=1.5
+            refractory_ms=1.0
         )
 
         # Estimate spike amplitudes on TRUE peak channel

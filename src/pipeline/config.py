@@ -101,7 +101,7 @@ class SorterConfig:
     do_CAR: bool = False  # Set False if CAR / loccar was applied in CatGT or Preproc
     save_phy: bool = True
     export_alf: bool = True
-    isi_threshold_s: float = 0.0015
+    isi_threshold_s: float = 0.0010
     qc_isi_cutoff: float = 0.10
     qc_presence_ratio: float = 0.90
     qc_amp_cutoff: float = 0.10

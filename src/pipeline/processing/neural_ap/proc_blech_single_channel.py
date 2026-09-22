@@ -133,7 +133,7 @@ def detect_spike_snippets(
     n_pre = int(pre_ms * fs / 1000.0)
     n_post = int(post_ms * fs / 1000.0)
     snippet_len = n_pre + n_post
-    refractory_samples = int(1.5 * fs / 1000.0)
+    refractory_samples = int(1.0 * fs / 1000.0)
 
     crossings = np.where(filtered_signal < -thresh)[0]
     if len(crossings) == 0:
