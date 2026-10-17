@@ -1,0 +1,8 @@
+# Install torch with CUDA FIRST (see README / environment.yml). On Windows, plain `pip install torch`
+# gives a CPU-only build, and Kilosort would then run on the CPU without telling you.
+spikeinterface[full]==0.105.2
+kilosort==4.1.7
+hdbscan>=0.8.40
+pyyaml>=6.0
+# Tested together (Linux, simulated data): numpy 2.5.4, scipy 1.18.1, scikit-learn 1.9.1,
+# numba 0.68.0, torch 2.14.1, probeinterface 0.4.1, neo 0.14.5, pandas 3.0.6, matplotlib 3.11.2
