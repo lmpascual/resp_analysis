@@ -117,6 +117,8 @@ with its value. Windows from 50 ms to the whole recording; it reads the scratch 
 Filter by label, failed criterion, polarity, cross-sorter match or review status; press `?` for
 keys. Verdicts and notes are saved to `<output>/review/<sorter>_unit_review.tsv`.
 `docs/unit_labels_explained.md` explains every processing step and labelling rule.
+`docs/waveform_shape_criteria.md` illustrates the waveform-shape rules (noise / non_soma), where
+their cutoffs come from, and why they may not suit brainstem units.
 
 **Times:** ALF spike times are seconds from the start of the sorted file. For e097 that's the
 CatGT extract, so add 1740 s for raw-run time.

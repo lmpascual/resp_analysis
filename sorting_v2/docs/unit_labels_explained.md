@@ -187,6 +187,8 @@ A unit is non_soma when:
 
 A NaN width counts as "narrow", which pushes the unit toward non_soma.
 
+`waveform_shape_criteria.md` illustrates these shape rules on real e097 templates. It traces the cutoffs to their sources (the authors' empirical choices, plus a cortical-culture study for the axonal rules) and checks them against brainstem literature.
+
 ### MUA rules (pass conditions)
 
 | Metric | Meaning | Passes if |
