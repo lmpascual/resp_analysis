@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="680" viewBox="0 0 680 340" role="img">
+<title>Waveform landmarks bombcell measures</title>
+<desc>A schematic extracellular spike with the pre-trough peak A, trough B and post-trough peak C marked, the widths of A and B at half height, and the trough-to-C duration.</desc><style>.t{font:14px sans-serif;fill:#222}.ts{font:12px sans-serif;fill:#555}.th{font:500 14px sans-serif;fill:#222}.leader{stroke:#999;stroke-width:0.5;stroke-dasharray:3 3;fill:none}</style><rect x="0" y="0" width="680" height="340" fill="#fff"/>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
+<line x1="40" y1="150" x2="400" y2="150" stroke="#bbb" stroke-width="0.5" stroke-dasharray="4 4"/>
+<line class="leader" x1="160" y1="122" x2="160" y2="150"/>
+<line class="leader" x1="204" y1="150" x2="204" y2="262"/>
+<line class="leader" x1="264" y1="104" x2="264" y2="150"/>
+<path d="M40 150 L130 150 C142 150 150 122 160 122 C170 122 178 150 184 178 C191 215 197 262 204 262 C212 262 221 182 234 142 C244 112 254 104 264 104 C290 104 320 130 350 142 C370 148 385 150 400 150" fill="none" stroke="#222" stroke-width="2" stroke-linejoin="round"/>
+<line x1="147" y1="136" x2="173" y2="136" stroke="#D85A30" stroke-width="2"/>
+<line x1="191" y1="206" x2="219" y2="206" stroke="#378ADD" stroke-width="2"/>
+<circle cx="160" cy="122" r="5" fill="#D85A30"/>
+<circle cx="204" cy="262" r="5" fill="#378ADD"/>
+<circle cx="264" cy="104" r="5" fill="#1D9E75"/>
+<line class="leader" x1="160" y1="116" x2="160" y2="72"/>
+<text class="ts" x="40" y="64">A · peak before trough</text>
+<line class="leader" x1="147" y1="140" x2="120" y2="178"/>
+<text class="ts" x="40" y="196">A half-height width</text>
+<line class="leader" x1="270" y1="104" x2="424" y2="104"/>
+<text class="ts" x="430" y="108">C · peak after trough</text>
+<line class="leader" x1="222" y1="206" x2="424" y2="206"/>
+<text class="ts" x="430" y="210">B half-height width</text>
+<line class="leader" x1="210" y1="262" x2="424" y2="262"/>
+<text class="ts" x="430" y="266">B · trough</text>
+<line class="leader" x1="204" y1="266" x2="204" y2="286"/>
+<line class="leader" x1="264" y1="110" x2="264" y2="286"/>
+<line x1="208" y1="292" x2="260" y2="292" stroke="#555" stroke-width="1" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+<text class="ts" x="234" y="314" text-anchor="middle">p2t: trough to C</text>
+</svg>
