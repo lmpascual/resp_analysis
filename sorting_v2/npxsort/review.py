@@ -38,6 +38,19 @@ MAX_RAW_WINDOW_S = 120.0         # longer windows must use the precomputed envel
 AMP_HALF_WINDOW = 6              # samples (±0.2 ms) searched for each spike's extremum on a channel
 REVIEW_COLUMNS = ["unit_id", "verdict", "note", "label_at_review", "reviewed_at"]
 
+# Per-spike flags (computed once per run in a background pass over the binary, cached in scratch)
+FOOTPRINT_CHANNELS = 5           # compare each spike on the unit's top channels (by template peak-to-peak) ...
+FOOTPRINT_MIN_FRACTION = 0.3     # ... that have at least this fraction of the largest channel's peak-to-peak
+FOOTPRINT_MISMATCH = 0.5         # flag when the spike's cross-channel pattern differs from the template's by
+                                 # more than this fraction after scaling ...
+FOOTPRINT_MIN_SIGMA = 6.0        # ... and that difference is this many noise SDs (see footprint_residuals)
+DUPLICATE_MS = 0.1               # another unit's spike this close in time ...
+DUPLICATE_RADIUS_UM = 100.0      # ... whose largest channel is this close ...
+DUPLICATE_FLANK_MS = (0.5, 2.5)  # ... for a unit pair whose 0.1-ms coincidences exceed those at 0.5-2.5 ms
+DUPLICATE_EXCESS = 4.0           #     by this factor ...
+DUPLICATE_MIN_COUNT = 5          #     with at least this many coincidences
+FLAGS_VERSION = 1
+
 
 # ----------------------------------------------------------------------------- bombcell reasons
 
@@ -159,6 +172,123 @@ def reason_summary(criteria: list[dict], label: str) -> str:
     return "; ".join(out)
 
 
+# ----------------------------------------------------------------------------- per-spike flags
+
+def footprint_setup(dense: np.ndarray, ptp: np.ndarray, nbefore: int):
+    """For each unit: up to FOOTPRINT_CHANNELS channels (largest peak-to-peak first) holding at least
+    FOOTPRINT_MIN_FRACTION of the largest channel's peak-to-peak, the offset of the template's
+    extremum on each (samples from the spike time), and that signed extremum value (0 = unused slot)."""
+    n = dense.shape[0]
+    ch = np.zeros((n, FOOTPRINT_CHANNELS), dtype=np.int64)
+    off = np.zeros((n, FOOTPRINT_CHANNELS), dtype=np.int64)
+    tv = np.zeros((n, FOOTPRINT_CHANNELS), dtype=np.float32)
+    for i in range(n):
+        best = np.argsort(-ptp[i])[:FOOTPRINT_CHANNELS]
+        keep = best[ptp[i, best] >= FOOTPRINT_MIN_FRACTION * ptp[i, best[0]]]
+        for j, c in enumerate(keep):
+            w = dense[i, :, c]
+            k = int(np.argmax(np.abs(w)))
+            ch[i, j], off[i, j], tv[i, j] = c, k - nbefore, w[k]
+        ch[i, len(keep):] = keep[0]
+    return ch, off, tv
+
+
+def footprint_residuals(traces, gain, offset, noise, n_samples: int, fs: float, setups: dict, spike_vectors: dict) -> dict:
+    """Footprint mismatch of every spike, in one sequential pass over the binary.
+
+    For a spike with measured amplitudes a (extremum of the template's sign within ±AMP_HALF_WINDOW
+    samples of the template's extremum time, on each footprint channel) and template values t:
+    alpha = a.t / t.t is the best overall scale (so amplitude changes such as adaptation are allowed)
+    and d = a - alpha t is what the template's cross-channel pattern can't explain.
+    Returns per sorter (relative, sigma):
+      relative = |d| / |alpha t|  (0 = same pattern as the template; inf = opposite polarity;
+                                   NaN = fewer than two footprint channels)
+      sigma    = sqrt(sum((d_c / noise_c)^2))  (how far d is above the channels' noise)
+    """
+    win = np.arange(-AMP_HALF_WINDOW, AMP_HALF_WINDOW + 1)
+    margin = 256
+    out = {name: (np.full(sv[0].size, np.nan, dtype=np.float32), np.full(sv[0].size, np.nan, dtype=np.float32))
+           for name, sv in spike_vectors.items()}
+    step = int(fs)
+    for c0 in range(0, n_samples, step):
+        c1 = min(n_samples, c0 + step)
+        a0, a1 = max(0, c0 - margin), min(n_samples, c1 + margin)
+        block = np.asarray(traces[a0:a1])
+        for name, (sample, unit) in spike_vectors.items():
+            i0, i1 = np.searchsorted(sample, [c0, c1])
+            if i1 == i0:
+                continue
+            ch, off, tv = setups[name]
+            u = unit[i0:i1]
+            idx = (sample[i0:i1] - a0)[:, None, None] + off[u][:, :, None] + win[None, None, :]
+            np.clip(idx, 0, block.shape[0] - 1, out=idx)
+            chu = ch[u]
+            seg = block[idx, chu[:, :, None]].astype(np.float32)
+            t = tv[u]
+            amp = np.where(t > 0, seg.max(axis=2), seg.min(axis=2)) * gain[chu] + offset[chu]
+            used = t != 0
+            amp = np.where(used, amp, 0.0)
+            tt = (t * t).sum(axis=1)
+            alpha = (amp * t).sum(axis=1) / tt
+            d = np.where(used, amp - alpha[:, None] * t, 0.0)
+            with np.errstate(divide="ignore", invalid="ignore"):
+                rel = np.sqrt((d ** 2).sum(axis=1)) / (np.abs(alpha) * np.sqrt(tt))
+            sig = np.sqrt(((d / noise[chu]) ** 2).sum(axis=1))
+            rel[alpha <= 0] = np.inf
+            few = used.sum(axis=1) < 2
+            rel[few] = np.nan
+            sig[few] = np.nan
+            out[name][0][i0:i1] = rel
+            out[name][1][i0:i1] = sig
+    return out
+
+
+def cross_unit_duplicates(sample: np.ndarray, unit: np.ndarray, near: np.ndarray, center: int,
+                          flank: tuple[int, int]) -> tuple[np.ndarray, dict]:
+    """Spikes that another nearby unit also claims, counted only for unit pairs that do this far more
+    often than chance.
+
+    For every pair of nearby units (near[u1, u2]) count coincidences within ±center samples (c0) and at
+    flank[0]..flank[1] samples apart (cf). Different neurons that fire in synchrony coincide about as
+    often at a few hundred µs as at 0.1 ms; one event assigned to both units only coincides at ~0.
+    A pair is "duplicating" when c0 >= DUPLICATE_MIN_COUNT and c0 >= DUPLICATE_EXCESS x the rate
+    expected from cf. Returns, per spike of the time-sorted spike vector, the duplicating partner's
+    unit index (or -1), and {(u1, u2): (c0, expected)} for duplicating pairs.
+    """
+    n = near.shape[0]
+    c0 = np.zeros(n * n, dtype=np.int64)
+    cf = np.zeros(n * n, dtype=np.int64)
+    pairs_a, pairs_b = [], []
+    lag = 1
+    while lag < sample.size:
+        dt = sample[lag:] - sample[:-lag]
+        close = np.nonzero(dt <= flank[1])[0]
+        if close.size == 0:
+            break
+        a, b, d = close, close + lag, dt[close]
+        ua, ub = unit[a], unit[b]
+        ok = (ua != ub) & near[ua, ub]
+        cen = ok & (d <= center)
+        fl = ok & (d >= flank[0])
+        c0 += np.bincount(ua[cen] * n + ub[cen], minlength=n * n) + np.bincount(ub[cen] * n + ua[cen], minlength=n * n)
+        cf += np.bincount(ua[fl] * n + ub[fl], minlength=n * n) + np.bincount(ub[fl] * n + ua[fl], minlength=n * n)
+        pairs_a.append(a[cen])
+        pairs_b.append(b[cen])
+        lag += 1
+    c0, cf = c0.reshape(n, n), cf.reshape(n, n)
+    expected = cf * (2 * center + 1) / (2 * (flank[1] - flank[0] + 1))
+    dup = (c0 >= DUPLICATE_MIN_COUNT) & (c0 >= DUPLICATE_EXCESS * expected)
+    partner = np.full(sample.size, -1, dtype=np.int64)
+    if pairs_a:
+        a, b = np.concatenate(pairs_a), np.concatenate(pairs_b)
+        keep = dup[unit[a], unit[b]]
+        a, b = a[keep], b[keep]
+        partner[a] = unit[b]
+        partner[b] = unit[a]
+    table = {(int(i), int(j)): (int(c0[i, j]), float(expected[i, j])) for i, j in zip(*np.nonzero(dup))}
+    return partner, table
+
+
 # ----------------------------------------------------------------------------- data
 
 class SorterData:
@@ -182,14 +312,18 @@ class SorterData:
         self.ptp = ptp
         self.dense_templates = dense  # kept so matched units can be drawn on another unit's channels
 
-        spikes = analyzer.sorting.to_spike_vector()
-        order = np.argsort(spikes["unit_index"], kind="stable")
-        bounds = np.searchsorted(spikes["unit_index"][order], np.arange(len(self.unit_ids) + 1))
+        spikes = analyzer.sorting.to_spike_vector()   # time-sorted
+        self.sv_sample = spikes["sample_index"].astype(np.int64)
+        self.sv_unit = spikes["unit_index"].astype(np.int64)
+        # positions of each unit's spikes in the spike vector, in time order
+        self.order = np.argsort(self.sv_unit, kind="stable")
+        self.bounds = np.searchsorted(self.sv_unit[self.order], np.arange(len(self.unit_ids) + 1))
         self.spikes: dict[int, np.ndarray] = {}
         for i, u in enumerate(self.unit_ids):
-            s = spikes["sample_index"][order[bounds[i]:bounds[i + 1]]]
-            self.spikes[u] = np.sort(s).astype(np.int64)
+            self.spikes[u] = self.sv_sample[self.order[self.bounds[i]:self.bounds[i + 1]]]
         self.index_of = {u: i for i, u in enumerate(self.unit_ids)}
+        self.analyzer_folder = folder / "analyzer"
+        self.flags = None   # set by ReviewData's background pass: dict(resid, partner) per spike-vector position
 
         # Two different "peak" channels:
         #  main     - the analyzer's main channel, on which every metric and bombcell rule was computed.
@@ -238,6 +372,36 @@ class SorterData:
         tmp.replace(self.review_file)
         return row
 
+    def set_flags(self, rel, sig, partner, table):
+        mismatch = (rel > FOOTPRINT_MISMATCH) & (sig > FOOTPRINT_MIN_SIGMA)
+        n = len(self.unit_ids)
+        self.flags = {"mismatch": mismatch, "testable": ~np.isnan(rel), "rel": rel, "partner": partner, "table": table,
+                      "n_mismatch": np.bincount(self.sv_unit[mismatch], minlength=n),
+                      "n_dup": np.bincount(self.sv_unit[partner >= 0], minlength=n),
+                      "n_testable": np.bincount(self.sv_unit[~np.isnan(rel)], minlength=n)}
+
+    def flag_counts(self, u) -> dict:
+        if self.flags is None:
+            return {"n_mismatch": None, "n_dup": None}
+        i = self.index_of[u]
+        f = self.flags
+        return {"n_mismatch": int(f["n_mismatch"][i]) if f["n_testable"][i] else None, "n_dup": int(f["n_dup"][i])}
+
+    def unit_flags(self, u) -> dict:
+        if self.flags is None:
+            return {"ready": False}
+        i = self.index_of[u]
+        pos = self.order[self.bounds[i]:self.bounds[i + 1]]
+        f = self.flags
+        mis = np.nonzero(f["mismatch"][pos])[0]
+        part = f["partner"][pos]
+        dup = np.nonzero(part >= 0)[0]
+        partners = [{"id": int(self.unit_ids[j]), "count": c, "expected": round(e, 1)}
+                    for (a, j), (c, e) in f["table"].items() if a == i]
+        return {"ready": True, "testable": bool(f["n_testable"][i] > 0), "mismatch": mis.tolist(),
+                "dup": dup.tolist(), "dup_partner": [int(self.unit_ids[j]) for j in part[dup]],
+                "partners": sorted(partners, key=lambda p: -p["count"])}
+
 
 class ReviewData:
     def __init__(self, out_dir: Path, scratch_dir: Path | None = None, time_offset_s: float = 0.0):
@@ -276,6 +440,8 @@ class ReviewData:
         self.env_bin = int(round(ENVELOPE_BIN_S * self.fs))
         self.env_cache = scratch / "review_cache" / f"envelope_{self.env_bin}.npz"
         threading.Thread(target=self._build_envelope, daemon=True).start()
+        self.cache_dir = scratch / "review_cache"
+        threading.Thread(target=self._build_flags, daemon=True).start()
 
     # --- envelope for long windows -------------------------------------------------------
     def _build_envelope(self):
@@ -304,13 +470,70 @@ class ReviewData:
             log.exception("Could not build the trace envelope; long windows will be read directly.")
 
     # --- API payloads --------------------------------------------------------------------
+    # --- per-spike flags --------------------------------------------------------------------
+    def _noise_levels(self) -> np.ndarray:
+        """Per-channel noise SD (µV): MAD of 10 random 1-s chunks."""
+        rng = np.random.default_rng(0)
+        n = int(self.fs)
+        x = np.concatenate([np.asarray(self.traces[s0:s0 + n], dtype=np.float32)
+                            for s0 in rng.integers(0, self.n_samples - n, 10)])
+        return (np.median(np.abs(x - np.median(x, axis=0)), axis=0) / 0.6745 * self.gain).astype(np.float32)
+
+    def _build_flags(self):
+        try:
+            t = time.time()
+            params = (f"v{FLAGS_VERSION}|{FOOTPRINT_CHANNELS}|{FOOTPRINT_MIN_FRACTION}|{AMP_HALF_WINDOW}|"
+                      f"{DUPLICATE_MS}|{DUPLICATE_RADIUS_UM}|{DUPLICATE_FLANK_MS}|{DUPLICATE_EXCESS}|{DUPLICATE_MIN_COUNT}")
+            todo, keys = {}, {}
+            for name, s in self.sorters.items():
+                keys[name] = f"{params}|{s.sv_sample.size}|{int(s.sv_sample.sum())}|{float(s.dense_templates.sum()):.3f}"
+                f = self.cache_dir / f"flags_{name}.npz"
+                if f.exists():
+                    z = np.load(f, allow_pickle=False)
+                    if str(z["key"]) == keys[name]:
+                        table = {(int(i), int(j)): (int(c), float(e)) for i, j, c, e in zip(z["ti"], z["tj"], z["tc"], z["te"])}
+                        s.set_flags(z["rel"], z["sig"], z["partner"], table)
+                        continue
+                todo[name] = s
+            if not todo:
+                log.info("Loaded per-spike flags from %s", self.cache_dir)
+                return
+            noise = self._noise_levels()
+            setups = {n: footprint_setup(s.dense_templates, s.ptp, s.nbefore) for n, s in todo.items()}
+            vectors = {n: (s.sv_sample, s.sv_unit) for n, s in todo.items()}
+            res = footprint_residuals(self.traces, self.gain, self.offset, noise, self.n_samples, self.fs, setups, vectors)
+            center = int(round(DUPLICATE_MS / 1000 * self.fs))
+            flank = tuple(int(round(v / 1000 * self.fs)) for v in DUPLICATE_FLANK_MS)
+            self.cache_dir.mkdir(parents=True, exist_ok=True)
+            for name, s in todo.items():
+                largest = np.array([s.largest_channel[u] for u in s.unit_ids])
+                loc = self.locations[largest]
+                near = np.linalg.norm(loc[:, None] - loc[None, :], axis=2) <= DUPLICATE_RADIUS_UM
+                partner, table = cross_unit_duplicates(s.sv_sample, s.sv_unit, near, center, flank)
+                rel, sig = res[name]
+                s.set_flags(rel, sig, partner, table)
+                k = list(table)
+                np.savez(self.cache_dir / f"flags_{name}.npz", key=keys[name], rel=rel, sig=sig, partner=partner,
+                         ti=np.array([a for a, _ in k], dtype=np.int64), tj=np.array([b for _, b in k], dtype=np.int64),
+                         tc=np.array([table[x][0] for x in k], dtype=np.int64), te=np.array([table[x][1] for x in k]))
+            log.info("Computed per-spike flags in %.0f s; cached in %s", time.time() - t, self.cache_dir)
+        except Exception:
+            log.exception("Could not compute per-spike flags; the browser works without them.")
+
+    def flags_ready(self) -> bool:
+        return all(s.flags is not None for s in self.sorters.values())
+
     def meta(self) -> dict:
         return {
             "fs": self.fs, "n_samples": self.n_samples, "duration_s": self.n_samples / self.fs,
             "time_offset_s": self.time_offset_s, "sorters": list(self.sorters),
             "experiment": self.out_dir.name, "output_dir": str(self.out_dir),
             "thresholds": {n: s.thresholds for n, s in self.sorters.items()},
-            "envelope_ready": self.envelope is not None,
+            "envelope_ready": self.envelope is not None, "flags_ready": self.flags_ready(),
+            "flag_rules": {"footprint_mismatch": FOOTPRINT_MISMATCH, "footprint_min_sigma": FOOTPRINT_MIN_SIGMA,
+                           "footprint_channels": FOOTPRINT_CHANNELS, "duplicate_ms": DUPLICATE_MS,
+                           "duplicate_radius_um": DUPLICATE_RADIUS_UM, "duplicate_flank_ms": list(DUPLICATE_FLANK_MS),
+                           "duplicate_excess": DUPLICATE_EXCESS},
         }
 
     def best_match(self, sorter: str, unit: int):
@@ -345,6 +568,7 @@ class ReviewData:
                 "polarity": s.polarity[u], "reasons": s.reasons[u],
                 "failed": sorted({c["metric"] for c in s.criteria[u] if c["failed"] and c["group"] != "compound"}),
                 "verdict": s.reviews.get(u, {}).get("verdict", ""),
+                **s.flag_counts(u),
             })
         return rows
 
@@ -392,6 +616,7 @@ class ReviewData:
             "metrics": {c: _jsonable(r[c]) for c in metric_cols},
             "neighbours": neighbours, "match": match,
             "review": s.reviews.get(unit, {"verdict": "", "note": ""}),
+            "flags": s.unit_flags(unit),
         }
 
     def channel_amplitudes(self, sorter: str, unit: int, ch: int) -> tuple[np.ndarray, int]:

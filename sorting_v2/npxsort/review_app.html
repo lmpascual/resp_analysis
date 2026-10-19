@@ -84,9 +84,12 @@
   <select id="fPol" title="Template polarity on the peak channel">
     <option value="">any polarity</option><option value="-1">negative-going</option><option value="1">positive-going</option>
   </select>
+  <select id="fFlag" title="Units with per-spike flags">
+    <option value="">any flags</option><option value="mis">has footprint mismatches</option><option value="dup">has duplicates</option><option value="either">either flag</option>
+  </select>
   <select id="sortBy" title="Sort">
     <option value="depth">sort: depth (top first)</option><option value="id">sort: unit id</option><option value="label">sort: label</option>
-    <option value="snr">sort: SNR</option><option value="spikes">sort: spike count</option>
+    <option value="snr">sort: SNR</option><option value="spikes">sort: spike count</option><option value="mis">sort: footprint mismatches (%)</option><option value="dup">sort: duplicates (%)</option>
   </select>
   <input id="jump" type="text" size="6" placeholder="unit #" title="Type a unit id and press Enter">
   <span id="count" class="muted"></span>
@@ -141,7 +144,9 @@
     <tr><td><kbd>D</kbd> / <kbd>A</kbd></td><td>page right / left (Shift: small step)</td></tr>
     <tr><td><kbd>W</kbd> / <kbd>S</kbd></td><td>zoom in / out (mouse wheel zooms at the cursor, drag pans, double-click zooms to 100 ms)</td></tr>
     <tr><td><kbd>N</kbd> / <kbd>P</kbd></td><td>centre on the next / previous spike of this unit</td></tr>
-    <tr><td><kbd>V</kbd></td><td>centre on the next ISI violation</td></tr>
+    <tr><td><kbd>V</kbd></td><td>centre on the next ISI violation (Shift: previous; same for U, F, X)</td></tr>
+    <tr><td><kbd>F</kbd></td><td>centre on the next footprint-mismatched spike (purple diamond)</td></tr>
+    <tr><td><kbd>X</kbd></td><td>centre on the next spike also assigned to a nearby unit (dark ring)</td></tr>
     <tr><td><kbd>U</kbd></td><td>centre on the next spike the other sorter's matched unit did <i>not</i> find</td></tr>
     <tr><td><kbd>B</kbd></td><td>busiest 10-s window for this unit</td></tr>
     <tr><td>click a channel label</td><td>plot that channel's per-spike amplitudes (dots, overview, histogram); default is the largest channel in µV</td></tr>
@@ -150,7 +155,9 @@
     <tr><td><kbd>?</kbd></td><td>this help</td></tr>
   </table>
   <p class="muted" style="margin:8px 0 0">Red dots: this unit's spikes at their aligned extremum on the peak channel (pale red ticks in the strip = spike the matched unit didn't find).
-  Amber triangles: spikes inside the ISI threshold. Green strip: best-matching unit from the other sorter (pale = not shared).
+  Amber triangles: spikes inside the ISI threshold.
+  Purple diamonds: footprint mismatch, i.e. the spike's amplitude pattern across the unit's top channels differs from the template's by more than 50% after scaling, and by more than 6 noise SDs.
+  Dark rings: the same event is also assigned to a nearby unit (largest channels within 100 µm) within 0.1 ms, counted only for unit pairs that coincide at 0.1 ms at least 4x more often than at 0.5-2.5 ms. Green strip: best-matching unit from the other sorter (pale = not shared).
   Coloured dots/rows: nearby units of the same sorter. Traces are the preprocessed (CatGT 300–9000 Hz + local CAR) voltage both sorters read.</p>
 </div>
 <div id="err"></div>
@@ -211,16 +218,18 @@ async function loadSorter(name) {
   applyFilters(true);
 }
 function applyFilters(selectFirst) {
-  const L = $("#fLabel").value, M = $("#fMatch").value, C = $("#fCrit").value, R = $("#fReview").value, P = $("#fPol").value;
+  const L = $("#fLabel").value, M = $("#fMatch").value, C = $("#fCrit").value, R = $("#fReview").value, P = $("#fPol").value, F = $("#fFlag").value;
   const curId = S.unit && S.unit.sorter === S.sorter ? S.unit.id : null;
   let f = S.units.filter(u =>
     (!L || (L === "!good" ? u.label !== "good" : u.label === L)) &&
     (!M || (M === "yes") === u.found_by_both) &&
     (!C || u.failed.includes(C)) &&
     (!R || (R === "yes") === !!u.verdict) &&
-    (!P || u.polarity === +P));
+    (!P || u.polarity === +P) &&
+    (!F || (F === "mis" ? u.n_mismatch > 0 : F === "dup" ? u.n_dup > 0 : (u.n_mismatch > 0 || u.n_dup > 0))));
   const by = $("#sortBy").value, order = { good: 0, mua: 1, non_soma: 2, noise: 3 };
-  const key = { depth: u => -u.depth, id: u => u.id, label: u => order[u.label] * 1e6 - u.depth, snr: u => -(u.snr ?? -1), spikes: u => -u.num_spikes }[by];
+  const key = { depth: u => -u.depth, id: u => u.id, label: u => order[u.label] * 1e6 - u.depth, snr: u => -(u.snr ?? -1), spikes: u => -u.num_spikes,
+    mis: u => -(u.n_mismatch ?? 0) / u.num_spikes, dup: u => -(u.n_dup ?? 0) / u.num_spikes }[by];
   f.sort((a, b) => key(a) - key(b) || a.id - b.id);
   S.filtered = f;
   renderList();
@@ -233,8 +242,15 @@ function renderList() {
   $("#list").innerHTML = S.filtered.map((u, i) =>
     `<div class="urow" data-i="${i}" title="${u.reasons || "passes all criteria"}">
        <b>#${u.id}</b><span><span class="badge b-${u.label}">${u.label}</span></span>
-       <span class="reason">${u.found_by_both ? "◆ " : ""}${u.depth.toFixed(0)} µm · ${u.reasons || "—"}</span>
+       <span class="reason">${flagBadge(u)}${u.found_by_both ? "◆ " : ""}${u.depth.toFixed(0)} µm · ${u.reasons || "—"}</span>
        <span>${u.verdict ? "✓" : ""}</span></div>`).join("");
+}
+// compact per-unit flag counts for the list: F = footprint-mismatched spikes, D = duplicated spikes
+function flagBadge(u) {
+  let t = "";
+  if (u.n_mismatch > 0) t += `<b style="color:#7c3aed" title="${u.n_mismatch} footprint-mismatched spikes">F${u.n_mismatch}</b> `;
+  if (u.n_dup > 0) t += `<b style="color:#0f172a" title="${u.n_dup} spikes also assigned to a nearby unit">D${u.n_dup}</b> `;
+  return t;
 }
 function highlightRow() {
   document.querySelectorAll(".urow.sel").forEach(e => e.classList.remove("sel"));
@@ -242,13 +258,13 @@ function highlightRow() {
   if (row) { row.classList.add("sel"); row.scrollIntoView({ block: "nearest" }); }
 }
 $("#list").addEventListener("click", e => { const r = e.target.closest(".urow"); if (r) selectPos(+r.dataset.i); });
-["#fLabel", "#fMatch", "#fCrit", "#fReview", "#fPol", "#sortBy"].forEach(s => $(s).addEventListener("change", () => applyFilters(false)));
+["#fLabel", "#fMatch", "#fCrit", "#fReview", "#fPol", "#fFlag", "#sortBy"].forEach(s => $(s).addEventListener("change", () => applyFilters(false)));
 $("#sorter").addEventListener("change", e => loadSorter(e.target.value));
 $("#jump").addEventListener("keydown", e => {
   if (e.key !== "Enter") return;
   const id = +e.target.value, i = S.filtered.findIndex(u => u.id === id);
   if (i >= 0) selectPos(i);
-  else if (S.units.some(u => u.id === id)) { ["#fLabel", "#fMatch", "#fCrit", "#fReview", "#fPol"].forEach(s => $(s).value = ""); applyFilters(false); selectPos(S.filtered.findIndex(u => u.id === id)); }
+  else if (S.units.some(u => u.id === id)) { ["#fLabel", "#fMatch", "#fCrit", "#fReview", "#fPol", "#fFlag"].forEach(s => $(s).value = ""); applyFilters(false); selectPos(S.filtered.findIndex(u => u.id === id)); }
   else showErr(`No unit ${id} in ${S.sorter}`);
   e.target.blur();
 });
@@ -295,6 +311,12 @@ function computeFlags() {
   const u = S.unit, s = u.spikes, n = s.length, thr = S.isiThr / 1000 * S.meta.fs;
   S.viol = new Uint8Array(n);
   for (let i = 1; i < n; i++) if (s[i] - s[i - 1] < thr) { S.viol[i] = 1; S.viol[i - 1] = 1; }
+  S.mis = new Uint8Array(n); S.dup = new Uint8Array(n); S.dupPartner = new Int32Array(n).fill(-1);
+  const f = u.flags || {};
+  if (f.ready) {
+    f.mismatch.forEach(i => S.mis[i] = 1);
+    f.dup.forEach((i, k) => { S.dup[i] = 1; S.dupPartner[i] = f.dup_partner[k]; });
+  }
   S.sharedU = null; S.sharedM = null;
   if (u.match) {
     const m = u.match.spikes, tol = Math.round(0.0004 * S.meta.fs);  // 0.4 ms, the comparison's delta_time
@@ -325,7 +347,18 @@ function renderHead() {
   $("#unitHead").innerHTML = `<span class="title">${S.sorter} #${u.id}</span><span class="badge b-${u.label}">${u.label}</span>
     <span>${u.spikes.length} spikes · ${fmt(u.metrics.firing_rate)} Hz · ${pol} · ${nv} spikes in ISI &lt; ${S.isiThr} ms</span>
     <span>${ampTxt} · ${mainTxt}</span>
+    <span>${flagSummary(u)}</span>
     <span class="reasons">${u.reasons ? "fails: " + u.reasons : "passes every criterion"}</span><span>${matchTxt}</span>`;
+}
+
+function flagSummary(u) {
+  const f = u.flags || {};
+  if (!f.ready) return '<span class="muted">per-spike flags: computing…</span>';
+  const nm = f.mismatch.length, nd = f.dup.length, pct = x => (100 * x / u.spikes.length).toFixed(2) + "%";
+  const fp = f.testable ? `footprint mismatches: <b style="color:#7c3aed">${nm}</b> (${pct(nm)})${nm ? " · F jumps" : ""}`
+    : '<span class="muted">footprint check n/a (fewer than two strong channels)</span>';
+  const parts = f.partners.slice(0, 4).map(p => `#${p.id}: ${p.count} vs ${p.expected} by chance`).join(", ");
+  return `${fp} · duplicates with nearby units: <b>${nd}</b> (${pct(nd)})${parts ? " — " + parts : ""}${nd ? " · X jumps" : ""}`;
 }
 
 // ------------------------------------------------------------------ side panels
@@ -554,6 +587,8 @@ function drawTraces() {
     y = Math.min(Math.max(y, ampRow.r * g.laneH + 3), (ampRow.r + 1) * g.laneH - 3);
     if (S.viol[i]) { ctx.fillStyle = "#f59e0b"; ctx.strokeStyle = "#b45309"; ctx.beginPath(); ctx.moveTo(x - 6, y - 13); ctx.lineTo(x + 6, y - 13); ctx.lineTo(x, y - 4); ctx.closePath(); ctx.fill(); ctx.stroke(); }
     ctx.fillStyle = "#dc2626"; ctx.beginPath(); ctx.arc(x, y, many ? 2.2 : 3.5, 0, 6.283); ctx.fill();
+    if (S.mis[i]) { ctx.strokeStyle = "#7c3aed"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(x, y - 8); ctx.lineTo(x + 8, y); ctx.lineTo(x, y + 8); ctx.lineTo(x - 8, y); ctx.closePath(); ctx.stroke(); ctx.lineWidth = 1; }
+    if (S.dup[i]) { ctx.strokeStyle = "#0f172a"; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(x, y, 6, 0, 6.283); ctx.stroke(); ctx.lineWidth = 1; }
   }
 
   // strips
@@ -572,6 +607,12 @@ function drawTraces() {
   strip(`#${u.id} (this)`, "#dc2626", s, S.sharedU, "#dc2626", "#fca5a5");
   // re-mark ISI violations in the unit strip
   for (let i = a; i < b; i++) if (S.viol[i]) { ctx.fillStyle = "#f59e0b"; ctx.fillRect(Math.round(xOf(s[i])) - 1, g.stripTop + g.stripH - 5, 3, 3); }
+  // and the per-spike flags: purple = footprint mismatch (top), dark = duplicate (middle)
+  for (let i = a; i < b; i++) {
+    const xx = Math.round(xOf(s[i])) - 1;
+    if (S.mis[i]) { ctx.fillStyle = "#7c3aed"; ctx.fillRect(xx, g.stripTop, 3, 3); }
+    if (S.dup[i]) { ctx.fillStyle = "#0f172a"; ctx.fillRect(xx, g.stripTop + 4, 3, 3); }
+  }
   if (u.match) strip(`${u.match.sorter.slice(0, 4)} #${u.match.id}`, "#16a34a", u.match.spikes, S.sharedM, "#16a34a", "#86efac");
   nb.forEach(nu => strip(`#${nu.id} ${nu.label}`, S.nbColor[nu.id], Int32Array.from(S.wspk[nu.id] || []), null));
 
@@ -630,6 +671,8 @@ function drawOverview() {
   for (let i = 0; i < s.length; i += stride) if (!Number.isNaN(A[i]) && (i < a0 || i >= a1)) ctx.fillRect(xOf(s[i]) - 1, yOf(A[i]) - 1, 2, 2);
   ctx.fillStyle = "rgba(185,28,28,0.85)";
   for (let i = a0; i < a1; i++) if (!Number.isNaN(A[i])) ctx.fillRect(xOf(s[i]) - 1, yOf(A[i]) - 1, 2, 2);
+  ctx.fillStyle = "#7c3aed";
+  for (let i = 0; i < s.length; i++) if (S.mis[i] && !Number.isNaN(A[i])) ctx.fillRect(xOf(s[i]) - 1.5, yOf(A[i]) - 1.5, 3, 3);
 
   // marginal amplitude histogram: all spikes (pale) and spikes in view (dark), same scale
   const nbins = 60, hAll = new Float64Array(nbins), hWin = new Float64Array(nbins);
@@ -769,8 +812,10 @@ window.addEventListener("keydown", e => {
   else if (k === "0") { S.gain = 1; drawTraces(); }
   else if (k === "n" || k === "N") nextSpike(1);
   else if (k === "p" || k === "P") nextSpike(-1);
-  else if (k === "v" || k === "V") nextSpike(1, i => S.viol[i]);
-  else if (k === "u" || k === "U") { if (S.sharedU) nextSpike(1, i => !S.sharedU[i]); else showErr("This unit has no matched unit in the other sorter."); }
+  else if (k === "v" || k === "V") nextSpike(e.shiftKey ? -1 : 1, i => S.viol[i]);
+  else if (k === "u" || k === "U") { if (S.sharedU) nextSpike(e.shiftKey ? -1 : 1, i => !S.sharedU[i]); else showErr("This unit has no matched unit in the other sorter."); }
+  else if (k === "f" || k === "F") { if (S.mis.some(v => v)) nextSpike(e.shiftKey ? -1 : 1, i => S.mis[i]); else showErr("No footprint-mismatched spikes in this unit."); }
+  else if (k === "x" || k === "X") { if (S.dup.some(v => v)) nextSpike(e.shiftKey ? -1 : 1, i => S.dup[i]); else showErr("No duplicated spikes in this unit."); }
   else if (k === "b" || k === "B") busiest();
   else if (k >= "1" && k <= "6") setVerdict(VERDICTS[+k - 1][0]);
   else if (k === "?") $("#help").hidden = !$("#help").hidden;
@@ -780,6 +825,20 @@ window.addEventListener("keydown", e => {
 });
 let resizeTimer = null;
 window.addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { if (S.unit) { drawTemplate(); drawIsi(); loadWindow(); } }, 150); });
+
+// per-spike flags are computed by the server in the background on first use; refresh when ready
+function pollFlags() {
+  setTimeout(async () => {
+    try {
+      const m = await api("/api/meta");
+      if (!m.flags_ready) return pollFlags();
+      S.meta.flags_ready = true;
+      S.units = await api(`/api/units?sorter=${S.sorter}`);
+      applyFilters(false);
+      if (S.pos >= 0) selectPos(S.pos);
+    } catch (e) { pollFlags(); }
+  }, 3000);
+}
 
 // ------------------------------------------------------------------ start
 (async function init() {
@@ -793,6 +852,7 @@ window.addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer
     await loadSorter(sorter);
     if (h.unit) { const i = S.filtered.findIndex(u => u.id === +h.unit); if (i >= 0) selectPos(i); }
     document.title = `Unit review · ${S.meta.experiment}`;
+    if (!S.meta.flags_ready) pollFlags();
   } catch (e) { showErr("Could not start: " + e.message); $("#status").textContent = e.message; }
 })();
 </script>

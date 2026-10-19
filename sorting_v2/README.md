@@ -117,7 +117,18 @@ with its value. Windows from 50 ms to the whole recording; it reads the scratch 
 Filter by label, failed criterion, polarity, cross-sorter match or review status; press `?` for
 keys. Spike dots and the amplitude overview use each unit's largest channel in µV. Click a
 channel's label to plot that channel instead. The sorter's main channel, on which all metrics
-were computed, is tagged; for Kilosort it can differ (see `docs/unit_labels_explained.md`). Verdicts and notes are saved to `<output>/review/<sorter>_unit_review.tsv`.
+were computed, is tagged; for Kilosort it can differ (see `docs/unit_labels_explained.md`).
+
+Two per-spike flags help find contaminated units without scrolling every unit. On first launch they
+take about 25 s to compute; after that they're cached in `scratch_dir/review_cache`.
+- **Footprint mismatch** (purple diamond, key `F`): the spike's amplitude pattern across the unit's
+  top channels differs from the template's by more than 50% after scaling, and by more than 6 noise
+  SDs. Typically a neighbouring neuron's spike assigned to this unit.
+- **Duplicate** (dark ring, key `X`): a nearby unit (largest channels within 100 µm) has a spike within
+  0.1 ms. This is only counted for unit pairs that coincide at 0.1 ms at least 4× more often than at
+  0.5–2.5 ms, so synchronous firing isn't counted; what remains is the same event assigned to two units.
+
+The unit list shows the counts (F, D). You can filter and sort by them. Verdicts and notes are saved to `<output>/review/<sorter>_unit_review.tsv`.
 `docs/unit_labels_explained.md` explains every processing step and labelling rule.
 `docs/waveform_shape_criteria.md` illustrates the waveform-shape rules (noise / non_soma), where
 their cutoffs come from, and why they may not suit brainstem units.
