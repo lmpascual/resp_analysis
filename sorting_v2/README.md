@@ -115,7 +115,9 @@ times marked, ISI violations, the best-matching unit from the other sorter, near
 amplitude over the whole recording, the template, the ISI histogram, and every bombcell criterion
 with its value. Windows from 50 ms to the whole recording; it reads the scratch binary on demand.
 Filter by label, failed criterion, polarity, cross-sorter match or review status; press `?` for
-keys. Verdicts and notes are saved to `<output>/review/<sorter>_unit_review.tsv`.
+keys. Spike dots and the amplitude overview use each unit's largest channel in µV. Click a
+channel's label to plot that channel instead. The sorter's main channel, on which all metrics
+were computed, is tagged; for Kilosort it can differ (see `docs/unit_labels_explained.md`). Verdicts and notes are saved to `<output>/review/<sorter>_unit_review.tsv`.
 `docs/unit_labels_explained.md` explains every processing step and labelling rule.
 `docs/waveform_shape_criteria.md` illustrates the waveform-shape rules (noise / non_soma), where
 their cutoffs come from, and why they may not suit brainstem units.

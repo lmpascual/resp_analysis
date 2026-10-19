@@ -35,6 +35,7 @@ NEIGHBOUR_RADIUS_UM = 60.0       # other units whose peak channel is this close 
 MAX_NEIGHBOURS = 10
 ENVELOPE_BIN_S = 0.010           # precomputed min/max envelope used for long windows
 MAX_RAW_WINDOW_S = 120.0         # longer windows must use the precomputed envelope
+AMP_HALF_WINDOW = 6              # samples (±0.2 ms) searched for each spike's extremum on a channel
 REVIEW_COLUMNS = ["unit_id", "verdict", "note", "label_at_review", "reviewed_at"]
 
 
@@ -182,25 +183,26 @@ class SorterData:
         self.dense_templates = dense  # kept so matched units can be drawn on another unit's channels
 
         spikes = analyzer.sorting.to_spike_vector()
-        amps_ext = analyzer.get_extension("spike_amplitudes")
-        amps = amps_ext.get_data() if amps_ext is not None else np.full(spikes.size, np.nan)
         order = np.argsort(spikes["unit_index"], kind="stable")
         bounds = np.searchsorted(spikes["unit_index"][order], np.arange(len(self.unit_ids) + 1))
         self.spikes: dict[int, np.ndarray] = {}
-        self.amplitudes: dict[int, np.ndarray] = {}
         for i, u in enumerate(self.unit_ids):
-            idx = order[bounds[i]:bounds[i + 1]]
-            s = spikes["sample_index"][idx]
-            o = np.argsort(s, kind="stable")
-            self.spikes[u] = s[o].astype(np.int64)
-            self.amplitudes[u] = np.asarray(amps[idx][o], dtype="float32")
+            s = spikes["sample_index"][order[bounds[i]:bounds[i + 1]]]
+            self.spikes[u] = np.sort(s).astype(np.int64)
         self.index_of = {u: i for i, u in enumerate(self.unit_ids)}
 
-        peak = self.table["peak_channel_index"].reindex(self.unit_ids).to_numpy(dtype=int)
-        self.peak_channel = dict(zip(self.unit_ids, peak))
-        self.polarity = {}
+        # Two different "peak" channels:
+        #  main     - the analyzer's main channel, on which every metric and bombcell rule was computed.
+        #             For Kilosort it is the largest peak-to-peak channel of Kilosort's *whitened*
+        #             templates (SpikeInterface phykilosortextractors), which can differ from:
+        #  largest  - the largest peak-to-peak channel of the mean template in µV. The browser plots
+        #             amplitudes on this one by default.
+        main = np.asarray(analyzer.get_main_channels(outputs="index"), dtype=int)
+        self.main_channel = dict(zip(self.unit_ids, main))
+        self.largest_channel = dict(zip(self.unit_ids, ptp.argmax(axis=1).astype(int)))
+        self.polarity = {}  # on the main channel, matching bombcell's view of the unit
         for i, u in enumerate(self.unit_ids):
-            w = dense[i, :, peak[i]]
+            w = dense[i, :, main[i]]
             self.polarity[u] = 1 if w.max() > -w.min() else -1
 
         reproduced, self.criteria = explain_bombcell(self.table.reindex(self.unit_ids), self.thresholds)
@@ -257,6 +259,8 @@ class ReviewData:
         self.traces = np.memmap(pre / info["file_paths"][0], dtype=info["dtype"], mode="r",
                                 offset=int(info.get("file_offset", 0) or 0)).reshape(-1, self.n_channels)
         self.time_offset_s = float(time_offset_s)
+        self._amp_cache: dict = {}
+        self._amp_lock = threading.Lock()
 
         names = [n for n, s in cfg["sorters"].items() if s.get("enabled") and (self.out_dir / n / "units.tsv").exists()]
         self.sorters = {n: SorterData(n, self.out_dir, None) for n in names}
@@ -349,13 +353,12 @@ class ReviewData:
         i = s.index_of[unit]
         chans = s.top_channels[i]
         r = s.table.loc[unit]
-        peak = s.peak_channel[unit]
         neighbours = []
         ploc = self.locations[chans[:3]]
         for v in s.unit_ids:
             if v == unit:
                 continue
-            d = float(np.min(np.linalg.norm(ploc - self.locations[s.peak_channel[v]], axis=1)))
+            d = float(np.min(np.linalg.norm(ploc - self.locations[s.largest_channel[v]], axis=1)))
             if d <= NEIGHBOUR_RADIUS_UM:
                 neighbours.append({"id": int(v), "label": s.table.at[v, "label"], "distance_um": d,
                                    "num_spikes": int(s.table.at[v, "num_spikes"]), "polarity": s.polarity[v]})
@@ -374,17 +377,47 @@ class ReviewData:
                     "template": o.dense_templates[oi][:, chans].T.round(2).tolist(),
                 }
         metric_cols = [c for c in s.table.columns if c not in ("label", "peak_channel_id")]
+        w = s.dense_templates[i]
+        def chan_info(c):
+            return {"index": int(c), "id": self.channel_ids[c], "x": float(self.locations[c, 0]),
+                    "y": float(self.locations[c, 1]), "ptp": float(s.ptp[i, c]),
+                    "min": float(w[:, c].min()), "max": float(w[:, c].max())}
         return {
             "sorter": sorter, "id": int(unit), "label": r["label"], "reasons": s.reasons[unit],
-            "criteria": s.criteria[unit], "polarity": s.polarity[unit], "peak_channel": int(peak),
-            "channels": [{"index": int(c), "id": self.channel_ids[c], "x": float(self.locations[c, 0]),
-                          "y": float(self.locations[c, 1]), "ptp": float(s.ptp[i, c])} for c in chans],
-            "template": s.dense_templates[i][:, chans].T.round(2).tolist(), "nbefore": s.nbefore,
-            "spikes": s.spikes[unit].tolist(), "amplitudes": np.round(s.amplitudes[unit], 1).tolist(),
+            "criteria": s.criteria[unit], "polarity": s.polarity[unit],
+            "main_channel": chan_info(s.main_channel[unit]), "largest_channel": chan_info(s.largest_channel[unit]),
+            "channels": [chan_info(c) for c in chans],
+            "template": w[:, chans].T.round(2).tolist(), "nbefore": s.nbefore,
+            "spikes": s.spikes[unit].tolist(),
             "metrics": {c: _jsonable(r[c]) for c in metric_cols},
             "neighbours": neighbours, "match": match,
             "review": s.reviews.get(unit, {"verdict": "", "note": ""}),
         }
+
+    def channel_amplitudes(self, sorter: str, unit: int, ch: int) -> tuple[np.ndarray, int]:
+        """Each spike's amplitude (µV) on one channel: the extremum, of the template's sign on that
+        channel, within ±AMP_HALF_WINDOW samples of the template's extremum time. Cached."""
+        key = (sorter, unit, ch)
+        with self._amp_lock:
+            if key in self._amp_cache:
+                return self._amp_cache[key]
+        s = self.sorters[sorter]
+        w = s.dense_templates[s.index_of[unit]][:, ch]
+        k = int(np.argmax(np.abs(w)))
+        pol = 1 if w[k] > 0 else -1
+        sp = s.spikes[unit] + (k - s.nbefore)
+        win = np.arange(-AMP_HALF_WINDOW, AMP_HALF_WINDOW + 1)
+        out = np.empty(sp.size, dtype=np.float32)
+        for a in range(0, sp.size, 20000):
+            idx = np.clip(sp[a:a + 20000, None] + win[None, :], 0, self.n_samples - 1)
+            seg = np.asarray(self.traces[idx, ch])
+            out[a:a + 20000] = seg.max(axis=1) if pol > 0 else seg.min(axis=1)
+        out = out * self.gain[ch] + self.offset[ch]
+        with self._amp_lock:
+            if len(self._amp_cache) >= 128:
+                self._amp_cache.pop(next(iter(self._amp_cache)))
+            self._amp_cache[key] = (out, pol)
+        return out, pol
 
     def window_spikes(self, sorter: str, ids: list[int], start: int, end: int) -> dict:
         s = self.sorters[sorter]
@@ -486,6 +519,10 @@ def make_handler(data: ReviewData):
                 elif url.path == "/api/window":
                     ids = [int(x) for x in q.get("ids", "").split(",") if x]
                     self._json(data.window_spikes(q["sorter"], ids, int(q["start"]), int(q["end"])))
+                elif url.path == "/api/amplitudes":
+                    amps, pol = data.channel_amplitudes(q["sorter"], int(q["unit"]), int(q["ch"]))
+                    self._send(amps.astype("<f4").tobytes(), "application/octet-stream",
+                               {"X-Channel": int(q["ch"]), "X-Polarity": pol})
                 elif url.path == "/api/traces":
                     chans = [int(x) for x in q["ch"].split(",")]
                     body, h = data.traces_payload(chans, int(q["start"]), int(q["end"]), int(q.get("px", 1500)))

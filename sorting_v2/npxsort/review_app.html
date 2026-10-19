@@ -41,7 +41,7 @@
   canvas { display: block; }
   #traces { width: 100%; height: 100%; cursor: grab; }
   #traces.drag { cursor: grabbing; }
-  #overview { width: 100%; height: 92px; border-top: 1px solid var(--line); cursor: pointer; }
+  #overview { width: 100%; height: 150px; border-top: 1px solid var(--line); cursor: pointer; }
   #status { height: 22px; padding: 2px 12px; color: var(--muted); font-size: 12px; border-top: 1px solid var(--line); white-space: nowrap; overflow: hidden; }
   #side { overflow-y: auto; border-left: 1px solid var(--line); background: var(--panel); padding: 8px 10px; }
   #side h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 10px 0 4px; }
@@ -116,7 +116,7 @@
       <span id="timeLbl" class="muted"></span>
     </section>
     <div id="traceWrap"><canvas id="traces"></canvas></div>
-    <canvas id="overview" title="Spike amplitude (dots) and firing rate (line) over the whole recording. Click to jump."></canvas>
+    <canvas id="overview" title="Whole recording: each dot is one spike's amplitude (darker = in the current window), with their histogram at the right; grey blocks are the firing rate in 1-s bins. Click to jump."></canvas>
     <div id="status">Loading…</div>
   </main>
   <aside id="side">
@@ -144,6 +144,7 @@
     <tr><td><kbd>V</kbd></td><td>centre on the next ISI violation</td></tr>
     <tr><td><kbd>U</kbd></td><td>centre on the next spike the other sorter's matched unit did <i>not</i> find</td></tr>
     <tr><td><kbd>B</kbd></td><td>busiest 10-s window for this unit</td></tr>
+    <tr><td>click a channel label</td><td>plot that channel's per-spike amplitudes (dots, overview, histogram); default is the largest channel in µV</td></tr>
     <tr><td><kbd>+</kbd> / <kbd>-</kbd> / <kbd>0</kbd></td><td>trace gain up / down / reset</td></tr>
     <tr><td><kbd>1</kbd>–<kbd>6</kbd></td><td>verdict (see buttons); press again to clear</td></tr>
     <tr><td><kbd>?</kbd></td><td>this help</td></tr>
@@ -266,6 +267,10 @@ async function selectPos(i) {
   if (u.match) u.match.spikes = Int32Array.from(u.match.spikes);
   S.nbColor = {}; u.neighbours.forEach((n, k) => S.nbColor[n.id] = NB_COLORS[k % NB_COLORS.length]);
   computeFlags();
+  // amplitudes are plotted on the unit's largest channel in µV until another lane is clicked
+  S.ampCh = u.largest_channel.index; S.amp = null;
+  try { await loadAmplitudes(u); } catch (e) { showErr("Could not load amplitudes: " + e.message); }
+  if (myReq !== S.req) return;
   // keep the current window if it shows this unit firing, otherwise go to its busiest window
   const inWin = lb(u.spikes, S.t0 + S.win) - lb(u.spikes, S.t0);
   if (inWin < 5) busiest(false);
@@ -273,6 +278,19 @@ async function selectPos(i) {
   renderHead(); renderCriteria(); renderReview(); renderMetrics(); drawTemplate(); drawIsi();
   loadWindow();
 }
+async function loadAmplitudes(u) {
+  const ch = S.ampCh, r = await fetch(`/api/amplitudes?sorter=${u.sorter}&unit=${u.id}&ch=${ch}`);
+  if (!r.ok) throw new Error((await r.json()).error);
+  const v = new Float32Array(await r.arrayBuffer());
+  if (S.unit === u && S.ampCh === ch) S.amp = { ch, pol: +r.headers.get("X-Polarity"), v };
+}
+async function selectAmpChannel(ch) {
+  if (!S.unit || ch === S.ampCh) return;
+  S.ampCh = ch;
+  try { await loadAmplitudes(S.unit); } catch (e) { showErr("Could not load amplitudes: " + e.message); return; }
+  renderHead(); drawTemplate(); drawTraces(); drawOverview();
+}
+const chanInfo = c => S.unit.channels.find(x => x.index === c) || (S.unit.main_channel.index === c ? S.unit.main_channel : null);
 function computeFlags() {
   const u = S.unit, s = u.spikes, n = s.length, thr = S.isiThr / 1000 * S.meta.fs;
   S.viol = new Uint8Array(n);
@@ -298,8 +316,15 @@ function renderHead() {
     matchTxt = `best ${m.sorter} match <b>#${m.id}</b> <span class="badge b-${m.label}">${m.label}</span> agreement ${m.agreement.toFixed(2)}${m.found_by_both ? " (counted as found by both)" : " (below 0.5: not counted)"} · shared ${nsh} of ${u.spikes.length} spikes`;
   }
   const pol = u.polarity > 0 ? '<b style="color:#b45309">positive-going</b>' : "negative-going";
+  const big = u.largest_channel, main = u.main_channel, amp = chanInfo(S.ampCh) || big;
+  const who = S.sorter === "kilosort4" ? "Kilosort main channel" : "main channel";
+  const ampTxt = `amplitudes plotted on <b>ch ${amp.index}</b> (${amp.y.toFixed(0)} µm${amp.index === big.index ? ", largest in µV" : ""})`;
+  const mainTxt = main.index === big.index
+    ? `metrics use the same channel (${who})`
+    : `<span style="color:#b45309">metrics use the ${who} ch ${main.index} (${main.y.toFixed(0)} µm, ${(100 * main.ptp / big.ptp).toFixed(0)}% of the largest channel's size)</span>`;
   $("#unitHead").innerHTML = `<span class="title">${S.sorter} #${u.id}</span><span class="badge b-${u.label}">${u.label}</span>
-    <span>${u.spikes.length} spikes · ${fmt(u.metrics.firing_rate)} Hz · ${pol} · peak ch ${u.peak_channel} (${u.channels.find(c => c.index === u.peak_channel)?.y ?? "?"} µm) · ${nv} spikes in ISI &lt; ${S.isiThr} ms</span>
+    <span>${u.spikes.length} spikes · ${fmt(u.metrics.firing_rate)} Hz · ${pol} · ${nv} spikes in ISI &lt; ${S.isiThr} ms</span>
+    <span>${ampTxt} · ${mainTxt}</span>
     <span class="reasons">${u.reasons ? "fails: " + u.reasons : "passes every criterion"}</span><span>${matchTxt}</span>`;
 }
 
@@ -360,8 +385,20 @@ function setupCanvas(cv, cssH) {
   return [ctx, w, h];
 }
 function shownChannels() {
-  // top-N channels by template amplitude, drawn with the highest contact at the top
-  return S.unit.channels.slice(0, S.nch).map((c, k) => ({ ...c, k })).sort((a, b) => b.y - a.y || a.x - b.x);
+  // top-N channels by template amplitude (µV), always including the amplitude channel, drawn with
+  // the highest contact at the top; k indexes the unit's template rows
+  const all = S.unit.channels.map((c, k) => ({ ...c, k }));
+  let pick = all.slice(0, S.nch);
+  if (!pick.some(c => c.index === S.ampCh)) { const a = all.find(c => c.index === S.ampCh); if (a) pick = [...pick.slice(0, Math.max(0, S.nch - 1)), a]; }
+  return pick.sort((a, b) => b.y - a.y || a.x - b.x);
+}
+// lane label: amplitude channel in blue, plus a tag for the sorter's main (metrics) channel
+function laneLabel(ctx, c, x, yc) {
+  const isAmp = c.index === S.ampCh, isMain = c.index === S.unit.main_channel.index;
+  ctx.fillStyle = isAmp ? "#1d4ed8" : "#64748b"; ctx.font = (isAmp ? "bold " : "") + "11px system-ui";
+  ctx.fillText(`ch ${c.index}`, x, yc - 4);
+  ctx.font = "11px system-ui"; ctx.fillText(`${c.y.toFixed(0)} µm`, x, yc + 9);
+  if (isMain) { ctx.fillStyle = "#b45309"; ctx.fillText(S.sorter === "kilosort4" ? "KS main" : "main", x, yc + 22); }
 }
 function drawTemplate() {
   const u = S.unit, ch = shownChannels(), laneH = 64;
@@ -372,11 +409,10 @@ function drawTemplate() {
   const ns = T[0].length, x0 = 70, xw = W - x0 - 6, sx = i => x0 + i / (ns - 1) * xw;
   ch.forEach((c, row) => {
     const yc = row * laneH + laneH / 2, sy = v => yc - v / amax * laneH * 0.48;
-    ctx.fillStyle = c.index === u.peak_channel ? "#1d4ed8" : "#64748b"; ctx.font = "11px system-ui";
-    ctx.fillText(`ch ${c.index}`, 2, yc - 4); ctx.fillText(`${c.y.toFixed(0)} µm`, 2, yc + 9);
+    laneLabel(ctx, c, 2, yc);
     ctx.strokeStyle = "#e2e8f0"; ctx.beginPath(); ctx.moveTo(x0, yc); ctx.lineTo(W - 6, yc); ctx.stroke();
     if (M) { ctx.strokeStyle = "#16a34a"; ctx.setLineDash([4, 3]); ctx.lineWidth = 1.3; ctx.beginPath(); M[c.k].forEach((v, i) => i ? ctx.lineTo(sx(i), sy(v)) : ctx.moveTo(sx(i), sy(v))); ctx.stroke(); ctx.setLineDash([]); }
-    ctx.strokeStyle = "#dc2626"; ctx.lineWidth = c.index === u.peak_channel ? 2 : 1.3;
+    ctx.strokeStyle = "#dc2626"; ctx.lineWidth = c.index === S.ampCh ? 2 : 1.3;
     ctx.beginPath(); T[c.k].forEach((v, i) => i ? ctx.lineTo(sx(i), sy(v)) : ctx.moveTo(sx(i), sy(v))); ctx.stroke();
   });
   ctx.lineWidth = 1; ctx.strokeStyle = "#94a3b8"; const xs = sx(u.nbefore);
@@ -423,7 +459,9 @@ async function loadWindow() {
     S.tr = tr; S.wspk = wspk;
     drawTraces(); drawOverview();
     const nIn = lb(u.spikes, end) - lb(u.spikes, start);
-    $("#status").textContent = `${nIn} spikes in view · ${tr.mode === "raw" ? "full-resolution samples" : "min/max envelope per pixel"}` +
+    $("#status").textContent = `${nIn} spikes in view · ` +
+      (tr.mode === "raw" ? "full-resolution samples; dots at each spike's trough"
+        : "min/max envelope per pixel; dots at each spike's measured amplitude (zoom in to see nearby units' spikes on the trace)") +
       (S.hiddenNb > 0 ? ` · ${S.hiddenNb} more nearby units not shown (make the browser window taller)` : "") + " · drag to pan, wheel to zoom, ? for keys";
   } catch (e) { if (myReq === S.req) showErr(e.message); }
 }
@@ -457,12 +495,12 @@ function drawTraces() {
   const scale = S.gain * g.laneH * 0.42 / ref;   // px per µV
   const fs = S.meta.fs;
   const rows = tr.ch.map((c, r) => ({ c, r, yc: r * g.laneH + g.laneH / 2 }));
-  const peakRow = rows.find(o => o.c.index === u.peak_channel) || rows[0];
+  const ampRow = rows.find(o => o.c.index === S.ampCh) || rows[0];   // lane carrying the dots
 
   // traces
   rows.forEach(({ c, r, yc }) => {
     ctx.save(); ctx.beginPath(); ctx.rect(L, r * g.laneH, PW, g.laneH); ctx.clip();
-    ctx.strokeStyle = c.index === u.peak_channel ? "#1d4ed8" : "#475569"; ctx.lineWidth = 1;
+    ctx.strokeStyle = c.index === S.ampCh ? "#1d4ed8" : "#475569"; ctx.lineWidth = 1;
     ctx.beginPath();
     if (tr.mode === "raw") {
       const off = r * n;
@@ -472,13 +510,12 @@ function drawTraces() {
       for (let i = 0; i < n; i++) { const x = L + (i + 0.5) / n * PW; ctx.moveTo(x, yc - tr.data[off + 2 * i] * scale); ctx.lineTo(x, yc - tr.data[off + 2 * i + 1] * scale - 0.5); }
     }
     ctx.stroke(); ctx.restore();
-    ctx.fillStyle = c.index === u.peak_channel ? "#1d4ed8" : "#64748b"; ctx.font = (c.index === u.peak_channel ? "bold " : "") + "11px system-ui";
-    ctx.fillText(`ch ${c.index}`, 4, yc - 4); ctx.font = "11px system-ui"; ctx.fillText(`${c.y.toFixed(0)} µm`, 4, yc + 9);
+    laneLabel(ctx, c, 4, yc);
     ctx.strokeStyle = "#f1f5f9"; ctx.beginPath(); ctx.moveTo(L, (r + 1) * g.laneH); ctx.lineTo(W, (r + 1) * g.laneH); ctx.stroke();
   });
 
-  // value of the peak-channel trace at a spike: aligned extremum (of the unit's polarity) within ±0.4 ms
-  const pr = peakRow.r, half = Math.round(0.0004 * fs);
+  // value of the amplitude lane's trace at a spike: aligned extremum (of the given sign) within ±0.4 ms
+  const pr = ampRow.r, half = Math.round(0.0004 * fs);
   function extremum(sample, pol) {
     if (tr.mode === "raw") {
       const off = pr * n, i0 = Math.max(0, sample - tr.start - half), i1 = Math.min(n - 1, sample - tr.start + half);
@@ -498,16 +535,23 @@ function drawTraces() {
     ctx.strokeStyle = "rgba(220,38,38,0.18)";
     for (let i = a; i < b; i++) { const x = xOf(s[i]); ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, g.laneH * rows.length); ctx.stroke(); }
   }
-  // nearby units' spikes as small dots on the peak lane
-  if (S.showNb) nb.forEach(nu => {
+  // Dot height on the amplitude lane. Full-resolution view: the aligned extremum within ±0.4 ms.
+  // Envelope view (long windows, one pixel spans many samples): the spike's own amplitude measured
+  // on that channel by the server, because the envelope minimum near a spike is often a different,
+  // larger spike.
+  const amp = S.amp && S.amp.ch === S.ampCh ? S.amp : null, apol = amp ? amp.pol : u.polarity;
+  const dotValue = i => (tr.mode === "raw" || !amp) ? extremum(s[i], apol) : amp.v[i];
+  // nearby units' spikes as small dots on the peak lane (full-resolution view only; in the envelope
+  // view their height would be meaningless, and their tick rows below still show their times)
+  if (S.showNb && tr.mode === "raw") nb.forEach(nu => {
     const arr = S.wspk[nu.id] || []; ctx.fillStyle = S.nbColor[nu.id];
-    arr.forEach(sp => { const y = peakRow.yc - extremum(sp, nu.polarity || -1) * scale; ctx.globalAlpha = 0.85; ctx.fillRect(xOf(sp) - 2, Math.min(Math.max(y, peakRow.r * g.laneH + 2), (peakRow.r + 1) * g.laneH - 4) - 2, 4, 4); });
+    arr.forEach(sp => { const y = ampRow.yc - extremum(sp, nu.polarity || -1) * scale; ctx.globalAlpha = 0.85; ctx.fillRect(xOf(sp) - 2, Math.min(Math.max(y, ampRow.r * g.laneH + 2), (ampRow.r + 1) * g.laneH - 4) - 2, 4, 4); });
     ctx.globalAlpha = 1;
   });
   // this unit's spikes
   for (let i = a; i < b; i++) {
-    const x = xOf(s[i]); let y = peakRow.yc - extremum(s[i], u.polarity) * scale;
-    y = Math.min(Math.max(y, peakRow.r * g.laneH + 3), (peakRow.r + 1) * g.laneH - 3);
+    const x = xOf(s[i]); let y = ampRow.yc - dotValue(i) * scale;
+    y = Math.min(Math.max(y, ampRow.r * g.laneH + 3), (ampRow.r + 1) * g.laneH - 3);
     if (S.viol[i]) { ctx.fillStyle = "#f59e0b"; ctx.strokeStyle = "#b45309"; ctx.beginPath(); ctx.moveTo(x - 6, y - 13); ctx.lineTo(x + 6, y - 13); ctx.lineTo(x, y - 4); ctx.closePath(); ctx.fill(); ctx.stroke(); }
     ctx.fillStyle = "#dc2626"; ctx.beginPath(); ctx.arc(x, y, many ? 2.2 : 3.5, 0, 6.283); ctx.fill();
   }
@@ -548,46 +592,82 @@ function drawTraces() {
     ctx.strokeStyle = "#0f172a"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(xb, yb + bh / 2); ctx.lineTo(xb, yb - bh / 2); ctx.stroke(); ctx.lineWidth = 1;
     ctx.fillStyle = "#0f172a"; ctx.font = "11px system-ui"; ctx.fillText(`${bar} µV`, xb - 42, yb + 4);
   }
-  S.geom = { L, PW, W, H };
+  S.geom = { L, PW, W, H, laneH: g.laneH, nRows: rows.length };
 }
 function niceStep(x) { const p = Math.pow(10, Math.floor(Math.log10(x))), m = x / p; return (m < 1.5 ? 1 : m < 3.5 ? 2 : m < 7.5 ? 5 : 10) * p; }
 
 // ------------------------------------------------------------------ overview
 function drawOverview() {
+  // Whole recording: per-spike amplitude (top, with a marginal histogram) and firing rate as solid
+  // 1-s blocks (bottom strip). Spikes inside the current window are drawn darker in both, so a
+  // second amplitude mode (two neurons merged, drift, a cut-off) stands out.
   const u = S.unit, cv = $("#overview");
   const [ctx, W, H] = setupCanvas(cv);
   ctx.clearRect(0, 0, W, H);
-  const N = S.meta.n_samples, L = 64, PW = W - L - 4, xOf = smp => L + smp / N * PW, s = u.spikes, A = u.amplitudes;
-  // firing rate, 1-s bins
+  const HW = 64, L = 64, PW = W - L - HW - 12, N = S.meta.n_samples;
+  const amp = S.amp && S.amp.ch === S.ampCh ? S.amp : null;
+  const xOf = smp => L + smp / N * PW, s = u.spikes, A = amp ? amp.v : new Float32Array(s.length).fill(NaN), apol = amp ? amp.pol : u.polarity;
+  const ampT = 4, ampB = Math.round(H * 0.62), rateT = ampB + 8, rateB = H - 16;
+  S.ovGeom = { L, PW };
+  const a0 = lb(s, S.t0), a1 = lb(s, S.t0 + S.win);
+
+  // amplitude range (robust)
+  const sorted = Float32Array.from(A.filter(v => !Number.isNaN(v))).sort();
+  let lo = sorted[Math.floor(sorted.length * 0.005)] ?? -1, hi = sorted[Math.floor(sorted.length * 0.995)] ?? 1;
+  if (apol < 0) hi = Math.max(hi, 0); else lo = Math.min(lo, 0);
+  const pad = (hi - lo) * 0.06 || 1; lo -= pad; hi += pad;
+  const yOf = v => ampT + (1 - (v - lo) / (hi - lo)) * (ampB - ampT);
+
+  // current window
+  const wx = xOf(S.t0), ww = Math.max(2, S.win / N * PW);
+  ctx.fillStyle = "rgba(37,99,235,0.10)"; ctx.fillRect(wx, 0, ww, rateB);
+  ctx.strokeStyle = "rgba(37,99,235,0.6)"; ctx.strokeRect(wx + 0.5, 0.5, ww - 1, rateB - 1);
+
+  // amplitude panel
+  if (lo < 0 && hi > 0) { ctx.strokeStyle = "#cbd5e1"; ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.moveTo(L, yOf(0)); ctx.lineTo(L + PW, yOf(0)); ctx.stroke(); ctx.setLineDash([]); }
+  const stride = Math.max(1, Math.floor(s.length / 60000));
+  ctx.fillStyle = "rgba(220,38,38,0.30)";
+  for (let i = 0; i < s.length; i += stride) if (!Number.isNaN(A[i]) && (i < a0 || i >= a1)) ctx.fillRect(xOf(s[i]) - 1, yOf(A[i]) - 1, 2, 2);
+  ctx.fillStyle = "rgba(185,28,28,0.85)";
+  for (let i = a0; i < a1; i++) if (!Number.isNaN(A[i])) ctx.fillRect(xOf(s[i]) - 1, yOf(A[i]) - 1, 2, 2);
+
+  // marginal amplitude histogram: all spikes (pale) and spikes in view (dark), same scale
+  const nbins = 60, hAll = new Float64Array(nbins), hWin = new Float64Array(nbins);
+  for (let i = 0; i < s.length; i++) {
+    if (Number.isNaN(A[i])) continue;
+    const b = Math.floor((A[i] - lo) / (hi - lo) * nbins);
+    if (b >= 0 && b < nbins) { hAll[b]++; if (i >= a0 && i < a1) hWin[b]++; }
+  }
+  const hmax = Math.max(1, ...hAll), hx = L + PW + 10, bh = (ampB - ampT) / nbins;
+  ctx.strokeStyle = "#e2e8f0"; ctx.beginPath(); ctx.moveTo(hx, ampT); ctx.lineTo(hx, ampB); ctx.stroke();
+  for (let b = 0; b < nbins; b++) {
+    const y = ampB - (b + 1) * bh;
+    ctx.fillStyle = "#fca5a5"; ctx.fillRect(hx, y, hAll[b] / hmax * (HW - 4), Math.max(1, bh - 0.5));
+    ctx.fillStyle = "#b91c1c"; ctx.fillRect(hx, y, hWin[b] / hmax * (HW - 4), Math.max(1, bh - 0.5));
+  }
+
+  // firing rate as solid 1-s blocks
   const nb = Math.ceil(S.meta.duration_s), rate = new Float64Array(nb);
   for (let i = 0; i < s.length; i++) rate[Math.min(nb - 1, Math.floor(s[i] / S.meta.fs))]++;
-  const rmax = Math.max(1, ...rate);
-  // amplitude range (robust)
-  const sorted = Float32Array.from(A.filter(v => v !== null)).sort();
-  let lo = sorted[Math.floor(sorted.length * 0.005)] ?? -1, hi = sorted[Math.floor(sorted.length * 0.995)] ?? 1;
-  if (u.polarity < 0) hi = Math.max(hi, 0); else lo = Math.min(lo, 0);
-  const pad = (hi - lo) * 0.08 || 1; lo -= pad; hi += pad;
-  const yOf = v => 6 + (1 - (v - lo) / (hi - lo)) * (H - 22);
-  // window
-  ctx.fillStyle = "rgba(37,99,235,0.12)"; ctx.fillRect(xOf(S.t0), 0, Math.max(2, S.win / N * PW), H - 14);
-  ctx.strokeStyle = "rgba(37,99,235,0.6)"; ctx.strokeRect(xOf(S.t0), 0.5, Math.max(2, S.win / N * PW), H - 15);
-  // amplitudes
-  const stride = Math.max(1, Math.floor(s.length / 40000));
-  ctx.fillStyle = "rgba(220,38,38,0.35)";
-  for (let i = 0; i < s.length; i += stride) if (A[i] !== null) ctx.fillRect(xOf(s[i]), yOf(A[i]), 1.4, 1.4);
-  // rate
-  ctx.strokeStyle = "#334155"; ctx.lineWidth = 1; ctx.beginPath();
-  for (let k = 0; k < nb; k++) { const x = L + (k + 0.5) / nb * PW, y = H - 16 - rate[k] / rmax * (H - 24); k ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
-  ctx.stroke();
+  const rmax = Math.max(1, ...rate), bw = PW / nb;
+  ctx.fillStyle = "#94a3b8";
+  for (let k = 0; k < nb; k++) { const h = rate[k] / rmax * (rateB - rateT); if (h > 0) ctx.fillRect(L + k * bw, rateB - h, Math.max(1, bw), h); }
+  ctx.strokeStyle = "#e2e8f0"; ctx.beginPath(); ctx.moveTo(L, rateB + 0.5); ctx.lineTo(L + PW, rateB + 0.5); ctx.stroke();
+
+  // labels
   ctx.fillStyle = "#64748b"; ctx.font = "10px system-ui";
-  ctx.fillText("amplitude", 2, 12); ctx.fillText(`${hi.toFixed(0)} µV`, 2, 24); ctx.fillText(`${lo.toFixed(0)} µV`, 2, H - 18);
-  ctx.fillText(`rate (line), max ${rmax.toFixed(0)} Hz`, L + 4, H - 3);
+  ctx.fillText("amplitude", 2, ampT + 9); ctx.fillStyle = "#1d4ed8"; ctx.fillText(`ch ${S.ampCh}`, 2, ampT + 21);
+  ctx.fillStyle = "#64748b"; ctx.fillText(`${hi.toFixed(0)} µV`, 2, ampT + 33); ctx.fillText(`${lo.toFixed(0)} µV`, 2, ampB - 2);
+  ctx.fillText("rate", 2, rateT + 9); ctx.fillText(`max ${rmax.toFixed(0)} Hz`, 2, rateT + 21);
+  ctx.fillText("all", hx, rateT + 9); ctx.fillStyle = "#b91c1c"; ctx.fillText("in view", hx + 20, rateT + 9);
+  ctx.fillStyle = "#64748b";
   const dur = S.meta.duration_s, dt = niceStep(dur / 10);
-  for (let t = 0; t <= dur; t += dt) ctx.fillText(t.toFixed(0), L + t / dur * PW - 6, H - 3 + 0);
+  for (let t = 0; t <= dur + 1e-9; t += dt) ctx.fillText(t.toFixed(0), L + t / dur * PW - 6, H - 3);
+  ctx.fillText("s", L + PW + 2, H - 3);
 }
 $("#overview").addEventListener("click", e => {
-  if (!S.unit) return;
-  const r = e.target.getBoundingClientRect(), L = 64, PW = r.width - L - 4;
+  if (!S.unit || !S.ovGeom) return;
+  const r = e.target.getBoundingClientRect(), { L, PW } = S.ovGeom;
   const f = (e.clientX - r.left - L) / PW; if (f < 0 || f > 1) return;
   S.t0 = f * S.meta.n_samples - S.win / 2; loadWindow();
 });
@@ -638,7 +718,18 @@ $("#help").onclick = () => $("#help").hidden = true;
 
 const tcv = $("#traces");
 let drag = null;
-tcv.addEventListener("mousedown", e => { drag = { x: e.clientX, t0: S.t0 }; tcv.classList.add("drag"); });
+// the label gutter left of the traces: clicking a channel's label plots that channel's amplitudes
+function gutterLane(e) {
+  if (!S.geom || !S.tr) return null;
+  const r = tcv.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
+  if (x >= S.geom.L || y < 0 || y >= S.geom.laneH * S.geom.nRows) return null;
+  return S.tr.ch[Math.floor(y / S.geom.laneH)] || null;
+}
+tcv.addEventListener("mousedown", e => {
+  const c = gutterLane(e);
+  if (c) { selectAmpChannel(c.index); return; }
+  drag = { x: e.clientX, t0: S.t0 }; tcv.classList.add("drag");
+});
 window.addEventListener("mouseup", () => { if (drag) { tcv.classList.remove("drag"); const moved = drag.moved; drag = null; if (moved) loadWindow(); } });
 window.addEventListener("mousemove", e => {
   if (drag && S.geom) {
@@ -649,6 +740,7 @@ window.addEventListener("mousemove", e => {
 });
 tcv.addEventListener("mousemove", e => {
   if (!S.geom || drag) return;
+  tcv.style.cursor = gutterLane(e) ? "pointer" : "";
   const r = tcv.getBoundingClientRect(), f = (e.clientX - r.left - S.geom.L) / S.geom.PW;
   if (f >= 0 && f <= 1) { const t = secs(S.t0 + f * S.win); $("#timeLbl").textContent = `cursor ${t.toFixed(4)} s` + (S.meta.time_offset_s ? ` (run ${(t + S.meta.time_offset_s).toFixed(3)} s)` : ""); }
 });
@@ -659,6 +751,7 @@ tcv.addEventListener("wheel", e => {
   zoom(e.deltaY > 0 ? 1.25 : 0.8, S.t0 + f * S.win);
 }, { passive: false });
 tcv.addEventListener("dblclick", e => {
+  if (gutterLane(e)) return;
   const r = tcv.getBoundingClientRect(), f = Math.min(1, Math.max(0, (e.clientX - r.left - S.geom.L) / S.geom.PW));
   const c = S.t0 + f * S.win; S.win = Math.round(0.1 * S.meta.fs); S.t0 = c - S.win / 2; syncWinSel(); loadWindow();
 });

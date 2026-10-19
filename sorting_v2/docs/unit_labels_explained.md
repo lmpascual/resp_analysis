@@ -153,6 +153,12 @@ Whitening makes noise roughly unit variance and decorrelates neighbouring channe
 
 ## 5. Labels: noise, non_soma, mua, good
 
+**Which channel the metrics use.** Every per-unit metric and shape rule uses the unit's *main channel*.
+- For Kilosort units, SpikeInterface takes it from Kilosort's own `templates.npy`: the channel with the largest peak-to-peak value. Those templates are in whitened space (`phykilosortextractors.py:527-537`).
+- Whitening reshapes amplitudes across neighbouring channels, so this isn't always the largest channel in µV.
+- In e097 it differs for 59 of 553 Kilosort 4 units (11%). Usually the main channel is a neighbour with about 95% of the amplitude, but for 8 units it has under 80%. Example: unit 434's metrics use ch 191 (203 µV peak-to-peak) rather than ch 240 (267 µV).
+- Lupin's main channels come from the mean template and differ for 35 of 685 units, all by less than 20%.
+
 **How the inputs are computed.**
 - Labels come from bombcell as implemented in SpikeInterface (`curation/bombcell_curation.py`). The thresholds are in `<sorter>/bombcell/thresholds_used.json`.
 - The template is the **mean of up to 500 random spikes** on the unit's main channel, from −1.0 to +2.0 ms, upsampled 10×.
