@@ -70,6 +70,15 @@ curation:
   method: bombcell                # labels: noise | mua | good | non_soma
   threshold_overrides: {}         # {section: {metric: {greater: x, less: y}}} merged over the bombcell defaults
   merge_suggestions: true         # write likely over-split pairs to a table for review (never applied automatically)
+  extract_units: []               # hand-defined units pulled out of the sorters' output; see npxsort/extract.py
+
+# Named periods (file time, s) compared by the epoch-stability stage: for every unit, does its spatial
+# footprint and waveform stay the same from one epoch to another? Writes <sorter>/epoch_stability.tsv,
+# epoch_activity.tsv and epoch_templates.npz. [] skips the stage.
+#   epochs:
+#     - {name: baseline, start_s: 0, end_s: 60}
+#     - {name: gasping, start_s: 85, end_s: 130}
+epochs: []
 
 comparison:
   enabled: true

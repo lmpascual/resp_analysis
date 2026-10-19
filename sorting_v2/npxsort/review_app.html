@@ -87,9 +87,14 @@
   <select id="fFlag" title="Units with per-spike flags">
     <option value="">any flags</option><option value="mis">has footprint mismatches</option><option value="dup">has duplicates</option><option value="either">either flag</option>
   </select>
+  <select id="fEpoch" title="Waveform change between epochs (epoch_stability.tsv)">
+    <option value="">any epoch result</option><option value="footprint differs">footprint differs in some epoch</option>
+    <option value="unclear">unclear in some epoch</option><option value="same">same footprint in every epoch</option>
+    <option value="extracted">extracted units</option>
+  </select>
   <select id="sortBy" title="Sort">
     <option value="depth">sort: depth (top first)</option><option value="id">sort: unit id</option><option value="label">sort: label</option>
-    <option value="snr">sort: SNR</option><option value="spikes">sort: spike count</option><option value="mis">sort: footprint mismatches (%)</option><option value="dup">sort: duplicates (%)</option>
+    <option value="snr">sort: SNR</option><option value="spikes">sort: spike count</option><option value="mis">sort: footprint mismatches (%)</option><option value="dup">sort: duplicates (%)</option><option value="ecos">sort: lowest epoch footprint cosine</option>
   </select>
   <input id="jump" type="text" size="6" placeholder="unit #" title="Type a unit id and press Enter">
   <span id="count" class="muted"></span>
@@ -127,6 +132,10 @@
     <canvas id="tmpl" height="10"></canvas>
     <h3>ISI histogram (0–50 ms)</h3>
     <canvas id="isi" height="120"></canvas>
+    <div id="epochBox" hidden>
+      <h3>Epochs: does the waveform change?</h3>
+      <div id="epochs" style="font-size:12px"></div>
+    </div>
     <h3>Bombcell criteria</h3>
     <div id="criteria"></div>
     <h3>Your review</h3>
@@ -164,6 +173,8 @@
 <script>
 "use strict";
 const $ = s => document.querySelector(s);
+const EPOCH_COLORS = ["#2563eb", "#ca8a04", "#db2777", "#0d9488", "#7c3aed", "#ea580c", "#4b5563"];
+const epochColor = name => EPOCH_COLORS[Math.max(0, (S.meta.epochs || []).findIndex(e => e.name === name)) % EPOCH_COLORS.length];
 const NB_COLORS = ["#0891b2", "#7c3aed", "#db2777", "#ea580c", "#0d9488", "#9333ea", "#ca8a04", "#2563eb", "#92400e", "#475569"];
 const VERDICTS = [
   ["single", "1 · single unit"], ["multi", "2 · multi-unit"], ["noise", "3 · noise / artifact"],
@@ -218,7 +229,7 @@ async function loadSorter(name) {
   applyFilters(true);
 }
 function applyFilters(selectFirst) {
-  const L = $("#fLabel").value, M = $("#fMatch").value, C = $("#fCrit").value, R = $("#fReview").value, P = $("#fPol").value, F = $("#fFlag").value;
+  const L = $("#fLabel").value, M = $("#fMatch").value, C = $("#fCrit").value, R = $("#fReview").value, P = $("#fPol").value, F = $("#fFlag").value, E = $("#fEpoch").value;
   const curId = S.unit && S.unit.sorter === S.sorter ? S.unit.id : null;
   let f = S.units.filter(u =>
     (!L || (L === "!good" ? u.label !== "good" : u.label === L)) &&
@@ -226,10 +237,12 @@ function applyFilters(selectFirst) {
     (!C || u.failed.includes(C)) &&
     (!R || (R === "yes") === !!u.verdict) &&
     (!P || u.polarity === +P) &&
-    (!F || (F === "mis" ? u.n_mismatch > 0 : F === "dup" ? u.n_dup > 0 : (u.n_mismatch > 0 || u.n_dup > 0))));
+    (!F || (F === "mis" ? u.n_mismatch > 0 : F === "dup" ? u.n_dup > 0 : (u.n_mismatch > 0 || u.n_dup > 0))) &&
+    (!E || (E === "extracted" ? !!u.extracted_as : E === "same" ? (u.epoch_verdict || "").startsWith("same") : u.epoch_verdict === E)));
   const by = $("#sortBy").value, order = { good: 0, mua: 1, non_soma: 2, noise: 3 };
   const key = { depth: u => -u.depth, id: u => u.id, label: u => order[u.label] * 1e6 - u.depth, snr: u => -(u.snr ?? -1), spikes: u => -u.num_spikes,
-    mis: u => -(u.n_mismatch ?? 0) / u.num_spikes, dup: u => -(u.n_dup ?? 0) / u.num_spikes }[by];
+    mis: u => -(u.n_mismatch ?? 0) / u.num_spikes, dup: u => -(u.n_dup ?? 0) / u.num_spikes,
+    ecos: u => u.epoch_min_cos ?? 2 }[by];
   f.sort((a, b) => key(a) - key(b) || a.id - b.id);
   S.filtered = f;
   renderList();
@@ -250,6 +263,9 @@ function flagBadge(u) {
   let t = "";
   if (u.n_mismatch > 0) t += `<b style="color:#7c3aed" title="${u.n_mismatch} footprint-mismatched spikes">F${u.n_mismatch}</b> `;
   if (u.n_dup > 0) t += `<b style="color:#0f172a" title="${u.n_dup} spikes also assigned to a nearby unit">D${u.n_dup}</b> `;
+  if (u.epoch_verdict === "footprint differs") t += '<b style="color:#c2410c" title="footprint differs between epochs">EΔ</b> ';
+  else if (u.epoch_verdict === "unclear") t += '<b style="color:#a16207" title="footprint change between epochs is unclear">E?</b> ';
+  if (u.extracted_as) t += `<b style="color:#0d9488" title="extracted by rule ${u.extracted_as}">+${u.extracted_as}</b> `;
   return t;
 }
 function highlightRow() {
@@ -258,13 +274,13 @@ function highlightRow() {
   if (row) { row.classList.add("sel"); row.scrollIntoView({ block: "nearest" }); }
 }
 $("#list").addEventListener("click", e => { const r = e.target.closest(".urow"); if (r) selectPos(+r.dataset.i); });
-["#fLabel", "#fMatch", "#fCrit", "#fReview", "#fPol", "#fFlag", "#sortBy"].forEach(s => $(s).addEventListener("change", () => applyFilters(false)));
+["#fLabel", "#fMatch", "#fCrit", "#fReview", "#fPol", "#fFlag", "#fEpoch", "#sortBy"].forEach(s => $(s).addEventListener("change", () => applyFilters(false)));
 $("#sorter").addEventListener("change", e => loadSorter(e.target.value));
 $("#jump").addEventListener("keydown", e => {
   if (e.key !== "Enter") return;
   const id = +e.target.value, i = S.filtered.findIndex(u => u.id === id);
   if (i >= 0) selectPos(i);
-  else if (S.units.some(u => u.id === id)) { ["#fLabel", "#fMatch", "#fCrit", "#fReview", "#fPol", "#fFlag"].forEach(s => $(s).value = ""); applyFilters(false); selectPos(S.filtered.findIndex(u => u.id === id)); }
+  else if (S.units.some(u => u.id === id)) { ["#fLabel", "#fMatch", "#fCrit", "#fReview", "#fPol", "#fFlag", "#fEpoch"].forEach(s => $(s).value = ""); applyFilters(false); selectPos(S.filtered.findIndex(u => u.id === id)); }
   else showErr(`No unit ${id} in ${S.sorter}`);
   e.target.blur();
 });
@@ -291,7 +307,7 @@ async function selectPos(i) {
   const inWin = lb(u.spikes, S.t0 + S.win) - lb(u.spikes, S.t0);
   if (inWin < 5) busiest(false);
   history.replaceState(null, "", `#sorter=${S.sorter}&unit=${id}`);
-  renderHead(); renderCriteria(); renderReview(); renderMetrics(); drawTemplate(); drawIsi();
+  renderHead(); renderCriteria(); renderReview(); renderMetrics(); renderEpochs(); drawTemplate(); drawIsi();
   loadWindow();
 }
 async function loadAmplitudes(u) {
@@ -347,8 +363,30 @@ function renderHead() {
   $("#unitHead").innerHTML = `<span class="title">${S.sorter} #${u.id}</span><span class="badge b-${u.label}">${u.label}</span>
     <span>${u.spikes.length} spikes · ${fmt(u.metrics.firing_rate)} Hz · ${pol} · ${nv} spikes in ISI &lt; ${S.isiThr} ms</span>
     <span>${ampTxt} · ${mainTxt}</span>
-    <span>${flagSummary(u)}</span>
+    <span>${flagSummary(u)}</span>${u.extracted_as ? `<span><b style="color:#0d9488">extracted unit (rule ${u.extracted_as})</b></span>` : ""}
     <span class="reasons">${u.reasons ? "fails: " + u.reasons : "passes every criterion"}</span><span>${matchTxt}</span>`;
+}
+
+function renderEpochs() {
+  const u = S.unit, E = u.epochs;
+  $("#epochBox").hidden = !E;
+  if (!E) { $("#epochs").innerHTML = ""; return; }
+  const sw = n => `<span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${epochColor(n)};margin-right:4px"></span>`;
+  let h = '<table class="crit"><tr class="sec"><td>epoch</td><td>spikes</td><td>rate</td></tr>';
+  for (const a of E.activity) h += `<tr><td>${sw(a.epoch)}${a.epoch}</td><td>${a.n_spikes}</td><td>${fmt(a.rate_hz)} Hz</td></tr>`;
+  h += "</table>";
+  if (E.pairs.length) {
+    const col = v => v === "footprint differs" ? "#b91c1c" : v === "unclear" ? "#a16207" : "#15803d";
+    h += '<table class="crit" style="margin-top:6px"><tr class="sec"><td>epochs</td><td title="footprint cosine (1 = same shape); nearest other unit shown in the tooltip">cos</td><td title="mean-waveform correlation">wf r</td><td title="amplitude ratio b/a">amp</td><td title="footprint shift along the probe vs all units (µm)">shift</td><td>verdict</td></tr>';
+    for (const p of E.pairs) {
+      h += `<tr title="n ${p.n_a} vs ${p.n_b}; nearest other unit's cosine ${fmt(p.neighbour_cosine)}; discriminant AUC ${fmt(p.auc)} (within-epoch ${fmt(p.auc_null)})">
+        <td>${sw(p.epoch_a)}${p.epoch_a} → ${sw(p.epoch_b)}${p.epoch_b}</td><td>${(+p.footprint_cosine).toFixed(3)}</td><td>${fmt(p.waveform_corr)}</td>
+        <td>${fmt(p.amp_ratio)}</td><td>${(+p.shift_vs_probe_um).toFixed(1)}</td><td style="color:${col(p.verdict)}">${p.verdict}</td></tr>`;
+    }
+    h += "</table>";
+  } else h += '<div class="muted">fewer than 30 spikes in all but one epoch: nothing to compare</div>';
+  h += '<div class="muted" style="margin-top:4px">Same footprint = cosine ≥ 0.99 and waveform r ≥ 0.9 (a neuron changing its firing). Footprint differs = cosine &lt; 0.97, about how different the nearest other neuron looks. Hover a row for details.</div>';
+  $("#epochs").innerHTML = h;
 }
 
 function flagSummary(u) {
@@ -435,7 +473,8 @@ function laneLabel(ctx, c, x, yc) {
 }
 function drawTemplate() {
   const u = S.unit, ch = shownChannels(), laneH = 64;
-  const [ctx, W, H] = setupCanvas($("#tmpl"), ch.length * laneH + 18);
+  const ET = (u.epochs && u.epochs.templates) || {}, eNames = Object.keys(ET);
+  const [ctx, W, H] = setupCanvas($("#tmpl"), ch.length * laneH + 18 + (eNames.length ? 16 : 0));
   ctx.clearRect(0, 0, W, H);
   const T = u.template, M = u.match ? u.match.template : null;
   let amax = 1; ch.forEach(c => T[c.k].forEach(v => amax = Math.max(amax, Math.abs(v))));
@@ -445,14 +484,24 @@ function drawTemplate() {
     laneLabel(ctx, c, 2, yc);
     ctx.strokeStyle = "#e2e8f0"; ctx.beginPath(); ctx.moveTo(x0, yc); ctx.lineTo(W - 6, yc); ctx.stroke();
     if (M) { ctx.strokeStyle = "#16a34a"; ctx.setLineDash([4, 3]); ctx.lineWidth = 1.3; ctx.beginPath(); M[c.k].forEach((v, i) => i ? ctx.lineTo(sx(i), sy(v)) : ctx.moveTo(sx(i), sy(v))); ctx.stroke(); ctx.setLineDash([]); }
+    // per-epoch mean waveforms (thin), under the whole-recording template (red)
+    eNames.forEach(e => { const w = ET[e][c.k]; if (!w) return; ctx.strokeStyle = epochColor(e); ctx.lineWidth = 1; ctx.globalAlpha = 0.9;
+      ctx.beginPath(); w.forEach((v, i) => i ? ctx.lineTo(sx(i), sy(v)) : ctx.moveTo(sx(i), sy(v))); ctx.stroke(); ctx.globalAlpha = 1; });
     ctx.strokeStyle = "#dc2626"; ctx.lineWidth = c.index === S.ampCh ? 2 : 1.3;
-    ctx.beginPath(); T[c.k].forEach((v, i) => i ? ctx.lineTo(sx(i), sy(v)) : ctx.moveTo(sx(i), sy(v))); ctx.stroke();
+    if (eNames.length) ctx.setLineDash([3, 2]);
+    ctx.beginPath(); T[c.k].forEach((v, i) => i ? ctx.lineTo(sx(i), sy(v)) : ctx.moveTo(sx(i), sy(v))); ctx.stroke(); ctx.setLineDash([]);
   });
   ctx.lineWidth = 1; ctx.strokeStyle = "#94a3b8"; const xs = sx(u.nbefore);
   ctx.setLineDash([2, 3]); ctx.beginPath(); ctx.moveTo(xs, 0); ctx.lineTo(xs, ch.length * laneH); ctx.stroke(); ctx.setLineDash([]);
   ctx.fillStyle = "#64748b"; ctx.font = "11px system-ui";
-  ctx.fillText(`−${(u.nbefore / S.meta.fs * 1000).toFixed(1)} ms`, x0, H - 4);
-  ctx.fillText(`+${((ns - u.nbefore) / S.meta.fs * 1000).toFixed(1)} ms · scale ±${amax.toFixed(0)} µV${M ? " · green: match" : ""}`, x0 + 60, H - 4);
+  const yt = ch.length * laneH + 14;
+  ctx.fillText(`−${(u.nbefore / S.meta.fs * 1000).toFixed(1)} ms`, x0, yt);
+  ctx.fillText(`+${((ns - u.nbefore) / S.meta.fs * 1000).toFixed(1)} ms · scale ±${amax.toFixed(0)} µV${M ? " · green: match" : ""}`, x0 + 60, yt);
+  if (eNames.length) {
+    let xl = 2; ctx.font = "10px system-ui";
+    ctx.fillStyle = "#dc2626"; ctx.fillText("all (dashed)", xl, yt + 15); xl += 62;
+    eNames.forEach(e => { ctx.fillStyle = epochColor(e); ctx.fillText(e, xl, yt + 15); xl += ctx.measureText(e).width + 10; });
+  }
 }
 function drawIsi() {
   const [ctx, W, H] = setupCanvas($("#isi"), 120);
@@ -659,6 +708,12 @@ function drawOverview() {
   const pad = (hi - lo) * 0.06 || 1; lo -= pad; hi += pad;
   const yOf = v => ampT + (1 - (v - lo) / (hi - lo)) * (ampB - ampT);
 
+  // epochs
+  (S.meta.epochs || []).forEach(e => {
+    const xa = xOf(e.start_s * S.meta.fs), xb = xOf(Math.min(N, e.end_s * S.meta.fs));
+    ctx.globalAlpha = 0.10; ctx.fillStyle = epochColor(e.name); ctx.fillRect(xa, 0, xb - xa, rateB); ctx.globalAlpha = 1;
+    ctx.fillStyle = epochColor(e.name); ctx.font = "9px system-ui"; ctx.fillText(e.name, xa + 2, 9, Math.max(10, xb - xa - 4));
+  });
   // current window
   const wx = xOf(S.t0), ww = Math.max(2, S.win / N * PW);
   ctx.fillStyle = "rgba(37,99,235,0.10)"; ctx.fillRect(wx, 0, ww, rateB);

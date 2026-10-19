@@ -17,6 +17,8 @@ import pandas as pd
 import spikeinterface.core as si
 import spikeinterface.curation as scur
 
+from .extract import extract_units
+
 log = logging.getLogger(__name__)
 
 QUALITY_METRICS = [
@@ -146,6 +148,8 @@ def unit_table(analyzer, labels: pd.DataFrame) -> pd.DataFrame:
     table["x_um"] = locs[:, 0]
     table["depth_um"] = locs[:, 1]
     table = table.join(metrics)
+    if "extracted_as" in analyzer.sorting.get_property_keys():
+        table["extracted_as"] = analyzer.sorting.get_property("extracted_as")
     return table
 
 
@@ -153,7 +157,10 @@ def postprocess_sorter(name: str, sorting: si.BaseSorting, rec: si.BaseRecording
     out_dir = Path(cfg["paths"]["output_dir"]) / name
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    sorting, extract_report = extract_units(sorting, rec, cfg, name)
     sorting, clean_report = clean_sorting(sorting, rec, cfg, name)
+    if extract_report:
+        clean_report["extracted_units"] = extract_report
     analyzer = build_analyzer(sorting, rec, cfg, out_dir / "analyzer", job_kwargs)
     labels = label_units(analyzer, cfg, out_dir)
     table = unit_table(analyzer, labels)

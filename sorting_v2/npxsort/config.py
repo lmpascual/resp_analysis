@@ -33,6 +33,10 @@ CHOICES = {
 }
 
 
+EXTRACT_REQUIRED = ("name", "channel", "polarity", "threshold_sd", "seed_window_s")
+EXTRACT_OPTIONAL = ("sorters", "search_window_s", "min_footprint_cosine", "neighbour_um")
+
+
 class ConfigError(ValueError):
     pass
 
@@ -83,6 +87,41 @@ def _validate(cfg: dict) -> None:
             raise ConfigError("motion.enabled is true, so sorters.kilosort4.params.do_correction must not be true.")
         if cfg["sorters"]["lupin"]["params"].get("apply_motion_correction", False):
             raise ConfigError("motion.enabled is true, so sorters.lupin.params.apply_motion_correction must not be true.")
+
+    seen = set()
+    for i, e in enumerate(cfg["epochs"]):
+        where = f"epochs[{i}]"
+        if not isinstance(e, dict) or set(e) != {"name", "start_s", "end_s"}:
+            raise ConfigError(f"{where} must be {{name, start_s, end_s}}.")
+        if e["start_s"] < 0 or e["start_s"] >= e["end_s"]:
+            raise ConfigError(f"{where}: need 0 <= start_s < end_s.")
+        if e["name"] in seen:
+            raise ConfigError(f"{where}: duplicate name '{e['name']}'.")
+        seen.add(e["name"])
+
+    names = set()
+    for i, rule in enumerate(cfg["curation"]["extract_units"]):
+        where = f"curation.extract_units[{i}]"
+        if not isinstance(rule, dict):
+            raise ConfigError(f"{where} must be a mapping.")
+        missing = [k for k in EXTRACT_REQUIRED if k not in rule]
+        if missing:
+            raise ConfigError(f"{where} is missing {missing}.")
+        unknown = set(rule) - set(EXTRACT_REQUIRED) - set(EXTRACT_OPTIONAL)
+        if unknown:
+            raise ConfigError(f"{where} has unknown keys {sorted(unknown)}.")
+        if rule["polarity"] not in ("positive", "negative"):
+            raise ConfigError(f"{where}.polarity must be 'positive' or 'negative'.")
+        for key in ("seed_window_s", "search_window_s"):
+            w = rule.get(key)
+            if w is not None and (len(w) != 2 or w[0] >= w[1]):
+                raise ConfigError(f"{where}.{key} must be [start, end] with start < end.")
+        for s in rule.get("sorters") or []:
+            if s not in cfg["sorters"]:
+                raise ConfigError(f"{where}.sorters: unknown sorter '{s}'.")
+        if rule["name"] in names:
+            raise ConfigError(f"{where}: duplicate name '{rule['name']}'.")
+        names.add(rule["name"])
 
     win = cfg["input"]
     if win["start_s"] is not None and win["start_s"] < 0:

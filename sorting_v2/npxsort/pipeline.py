@@ -1,6 +1,7 @@
 """Run the whole pipeline with resumable stages.
 
-Stages (in order): preprocess -> sort -> postprocess -> compare -> export.
+Stages (in order): preprocess -> sort -> postprocess -> stability -> compare -> export.
+stability only runs when the config lists `epochs`.
 Each finished stage writes a marker in <output_dir>/.stages/. Re-running skips finished stages;
 `redo` re-runs a stage and everything after it.
 """
@@ -26,10 +27,11 @@ from .sorters import run_sorter
 from .postprocess import postprocess_sorter
 from .compare import compare_sorters
 from .export import export_sorter
+from .stability import run_stability
 
 log = logging.getLogger("npxsort")
 
-STAGES = ["preprocess", "sort", "postprocess", "compare", "export"]
+STAGES = ["preprocess", "sort", "postprocess", "stability", "compare", "export"]
 
 
 def _setup_logging(out_dir: Path) -> Path:
@@ -180,6 +182,14 @@ def run_pipeline(cfg: dict, redo: str | None = None, stop_after: str | None = No
         manifest.setdefault("label_counts", {})[name] = {k: int(v) for k, v in tables[name]["label"].value_counts().items()}
     save_manifest()
     if stop_after == "postprocess":
+        return manifest
+
+    # 3b. does each unit's waveform change between epochs (e.g. eupnea vs gasping)?
+    if cfg["epochs"] and not stages.done("stability"):
+        manifest["epoch_stability"] = timed("stability", run_stability, analyzers, cfg, rec)
+        stages.mark("stability")
+        save_manifest()
+    if stop_after == "stability":
         return manifest
 
     # 4. compare

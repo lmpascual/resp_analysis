@@ -183,3 +183,48 @@ real neurons `mua` more often.
   (`preprocess._estimate_motion_kwargs`).
 - `input.source: catgt` and `si_folder` assume the data is already common-referenced. If you
   run CatGT without `-loccar`/`-gblcar`, use `spikeglx_raw` instead.
+
+## Epochs and hand-defined units
+
+**Epoch stability** (`epochs` in the config; stage `stability`).
+
+What it does:
+- Name periods of the recording, in file time. For every unit and every pair of epochs, the stage
+  checks whether its spatial footprint (relative amplitude across channels) and mean waveform stay
+  the same.
+- Outputs: `<sorter>/epoch_stability.tsv`, `epoch_activity.tsv` and `epoch_templates.npz`.
+- It separates a neuron that changes its firing during, say, gasping (same footprint) from a
+  different neuron taking over (footprint differs).
+
+Verdicts:
+- **same footprint:** cosine ≥ 0.99 and waveform r ≥ 0.9.
+- **footprint differs:** cosine < 0.97, about how different the nearest other neuron looks.
+- **unclear:** anything in between.
+- **same footprint; a neighbour looks alike:** the unit's nearest neighbour is itself that similar,
+  so a neighbour taking over couldn't be ruled out.
+
+The discriminant AUC is reported too, but with thousands of spikes it picks up the ~0.5 µm tissue
+movement that happens during gasping, so the verdict doesn't use it.
+
+The review browser shows the epochs as bands in the overview, each epoch's mean waveform in the
+template panel, and the per-pair table in the side panel. You can filter units by verdict.
+
+**Hand-defined units** (`curation.extract_units`; see `npxsort/extract.py`).
+
+Some neurons are too small or unusual for the sorters to give them their own unit. A rule describes
+the unit by:
+- its channel, polarity and threshold;
+- a seed window in which its footprint is learned.
+
+The pipeline then finds its spikes across the recording, adds it as a new unit (`extracted_as` in
+`units.tsv`), and removes those spikes from the units that absorbed them.
+
+For e097, `gasp_pos_ch148` recovers the positive-going gasping cell on ch 148/150: 27 spikes at
+103.7–109.4 s, previously inside KS4 #361 and Lupin #1079.
+
+The footprint-mismatch flag in the browser now also flags **polarity reversals**: spikes whose
+largest-channel deflection has the opposite sign to the unit's template. That is how the 26
+gasping spikes looked inside #361.
+
+**Phy:** see `docs/phy_tutorial.md`. Phy edits stay in the `phy` folder and are not read back by
+the pipeline or the browser.

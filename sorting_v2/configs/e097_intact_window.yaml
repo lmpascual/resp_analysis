@@ -38,9 +38,29 @@ sorters:
 job_kwargs:
   n_jobs: 12
 
+# Epochs for the waveform-stability check, in file time (raw-run time minus 1740 s). From the session's
+# milestones and breathing rate (outputs/e097/e097_whole_session_data.json): N2 at 1800-1815 s raw, breathing
+# drops below ~100 bpm (gasping) from ~1825 to ~1870 s, recovers to 120-140 bpm by ~1880 s, and the
+# "active expiration shift" milestone is 2078-2150 s.
+epochs:
+  - {name: baseline, start_s: 0, end_s: 60}
+  - {name: anoxia, start_s: 60, end_s: 85}
+  - {name: gasping, start_s: 85, end_s: 130}
+  - {name: recovery, start_s: 140, end_s: 338}
+  - {name: active_expiration, start_s: 338, end_s: 410}
+
 curation:
   threshold_overrides:
     mua:
       # Bombcell demotes units present in < 70% of the recording to MUA. Respiratory neurons can
       # stop firing during apnea/anoxia, so presence is reported in units.tsv but not used to label.
       presence_ratio: null
+  extract_units:
+    # A positive-going cell on ch 148/150 that fires only during the gasps (~27 spikes, 103-110 s). Too small
+    # for either sorter to give it a unit: Kilosort put its spikes into #361 and Lupin into #1079.
+    - name: gasp_pos_ch148
+      sorters: [kilosort4, lupin]
+      channel: 148
+      polarity: positive
+      threshold_sd: 5.0
+      seed_window_s: [95, 125]
