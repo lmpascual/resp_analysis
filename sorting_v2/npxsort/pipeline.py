@@ -28,6 +28,7 @@ from .postprocess import postprocess_sorter
 from .compare import compare_sorters
 from .export import export_sorter
 from .stability import run_stability
+from .summary import write_run_summary
 
 log = logging.getLogger("npxsort")
 
@@ -214,4 +215,8 @@ def run_pipeline(cfg: dict, redo: str | None = None, stop_after: str | None = No
 
     save_manifest()
     log.info("Done. Summary: labels %s | comparison %s", manifest.get("label_counts"), manifest.get("comparison"))
+    try:
+        log.info("Run summary written to %s", write_run_summary(out_dir))
+    except Exception:  # the results are already saved; don't fail the run over the summary
+        log.exception("Could not write run_summary.md; run summarize_run.py to retry")
     return manifest

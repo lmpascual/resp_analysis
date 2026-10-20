@@ -228,3 +228,24 @@ gasping spikes looked inside #361.
 
 **Phy:** see `docs/phy_tutorial.md`. Phy edits stay in the `phy` folder and are not read back by
 the pipeline or the browser.
+
+## Run summaries and analysis records
+
+Each run's numbers and its reasoning are kept in separate files:
+
+- **`run_summary.md`** in the output folder is written at the end of every run. It lists package
+  versions and the pipeline commit, every setting that differs from `defaults.yaml`, unit and label
+  counts (including positive-going units), rule-extracted units, epoch-stability verdicts, and
+  manual-review progress. The review section also shows any reviewed unit that has disappeared or
+  changed label since you reviewed it. It is generated from the run's own files, so don't edit it.
+  To regenerate it:
+
+  ```bat
+  python summarize_run.py C:\Users\lpascu\resp_analysis\outputs\e097\intact_window_v2
+  ```
+
+- **`docs/<recording>_analysis_record.md`** is written by hand and kept in git. It holds a dated
+  decision log (what, why, evidence, how to undo), findings with their evidence, the rule for which
+  units go into analysis, curation status, open questions and how to reproduce the run. Start a new
+  one from `docs/analysis_record_template.md`, which also lists the published guidance it follows.
+  `docs/e097_analysis_record.md` is the e097 record.

@@ -77,10 +77,12 @@ def build_analyzer(sorting: si.BaseSorting, rec: si.BaseRecording, cfg: dict, fo
         "random_spikes": {"method": "uniform", "max_spikes_per_unit": pp["max_spikes_per_unit"], "seed": pp["seed"]},
         "waveforms": {"ms_before": pp["ms_before"], "ms_after": pp["ms_after"]},
         "templates": {"operators": ["average", "median", "std"]},
-        "noise_levels": {},
+        # SpikeInterface draws a random seed for these if none is given, so SNR (and labels near its
+        # threshold) would change from run to run.
+        "noise_levels": {"random_slices_kwargs": {"seed": pp["seed"]}},
         "spike_amplitudes": {},
         "unit_locations": {"method": "monopolar_triangulation"},
-        "spike_locations": {},
+        "spike_locations": {"seed": pp["seed"]},
         "correlograms": {"window_ms": 100.0, "bin_ms": 1.0},
         "isi_histograms": {"window_ms": 100.0, "bin_ms": 1.0},
         "template_similarity": {},
@@ -93,7 +95,7 @@ def build_analyzer(sorting: si.BaseSorting, rec: si.BaseRecording, cfg: dict, fo
         metric_names += PCA_METRICS
 
     analyzer.compute("template_metrics", include_multi_channel_metrics=True, **job_kwargs)
-    analyzer.compute("quality_metrics", metric_names=metric_names, **job_kwargs)
+    analyzer.compute("quality_metrics", metric_names=metric_names, seed=pp["seed"], **job_kwargs)
     return analyzer
 
 
