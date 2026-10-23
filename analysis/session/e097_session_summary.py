@@ -1,13 +1,19 @@
 #!/usr/bin/env python3
 """
-Full-Session Cardiorespiratory & Opto Stimulation Interactive Dashboard for e097_g2:
+Whole-session breathing, heart-rate and laser summary for e097_g2, written to <outputs>/e097/e097_whole_session_data.json.
+
+    python e097_session_summary.py          (npxsort or cibrrig env; ~2 min, reads the 1.2 GB NIDQ file)
+
+anoxia_recovery.py (--breathing-json) and the optotag configs (session_json) read this file. It was written on
+2026-10-06 as the data step of an interactive session dashboard (the HTML builder is in archive/scripts/experiments/
+e097/build_whole_session_html.py); the milestones and laser trains are typed in from the experiment log, e097.docx.
+
 - Processes the complete 110.1-minute NIDQ session (66,072,893 samples at 10 kHz).
 - Extracts Diaphragm EMG envelope and breath onsets.
 - Computes cycle-by-cycle Inter-Breath Intervals (IBI, seconds) and Respiratory Rate (BPM).
 - Runs Pan-Tompkins QRS R-peak detection on ECG to compute Instantaneous Heart Rate (BPM).
 - Identifies all 9 Laser Stimulation Trains and timing parameters.
 - Integrates all experimental protocol details and surgical log observations from e097.docx.
-- Compiles a self-contained, standalone high-performance interactive HTML dashboard.
 """
 
 import sys
@@ -18,18 +24,16 @@ from pathlib import Path
 import numpy as np
 from scipy.signal import butter, sosfiltfilt, find_peaks
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "sorting"))
+from npxsort.paths import path  # noqa: E402
 
-BIN_PATH = Path(r"Z:\ramirezlab\budde\npx\animal_files\e097_g2\e097_g2_t0.nidq.bin")
+BIN_PATH = path("raw_data") / "e097_g2" / "e097_g2_t0.nidq.bin"
 fs = 9999.955307
 volts_per_count = 10.0 / 32768.0
 n_chans = 9
 
-out_dir = Path("outputs/e097")
-out_dir.mkdir(parents=True, exist_ok=True)
-out_html = out_dir / "e097_session_wide_cardiorespiratory_dashboard.html"
+out_dir = path("outputs") / "e097"
+out_json = out_dir / "e097_whole_session_data.json"
 
 
 def process_whole_session():
@@ -310,6 +314,7 @@ def process_whole_session():
 
 if __name__ == "__main__":
     payload = process_whole_session()
-    with open("outputs/e097/e097_whole_session_data.json", "w", encoding="utf-8") as f:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    with open(out_json, "w", encoding="utf-8") as f:
         json.dump(payload, f)
-    print("Saved outputs/e097/e097_whole_session_data.json.")
+    print(f"Saved {out_json}")

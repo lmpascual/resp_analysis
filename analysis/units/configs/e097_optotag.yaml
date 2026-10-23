@@ -1,0 +1,42 @@
+# e097 optotagging: project the intact-window Kilosort 4 units into the laser window (raw run 840-1440 s,
+# trains 1-8) and test each unit's light response. Run with: python optotag.py configs/e097_optotag.yaml
+# Only settings that differ from the defaults at the top of optotag.py are listed.
+
+paths:
+  sorted_output_dir: ${outputs}/e097/intact_window_v2
+  sorted_catgt: ${catgt}/catgt_e097_intact_420s/catgt_e097_g2
+  # Same CatGT command as the sorted window, only -startsecs=840 -maxsecs=600 -dest changed (made 2026-10-19).
+  laser_catgt: ${catgt}/catgt_e097_laser_600s/catgt_e097_g2
+  nidq_bin: ${raw_data}/e097_g2/e097_g2_t0.nidq.bin
+  session_json: ${outputs}/e097/e097_whole_session_data.json
+  output_dir: ${outputs}/e097/optotag_laser_window
+  scratch_dir: ${scratch}/e097_optotag
+
+sorter: kilosort4
+
+nidq:
+  laser_channel: 6        # XA6: 0 V off, ~1.04 V during a pulse
+  laser_threshold_v: 0.5
+  sync_column: 8          # XD0 digital word
+  sync_bit: 7             # 1 Hz sync shared with imec SY0 bit 6
+
+matching:
+  # The drift stage (2026-10-19) found the tissue 45-85 um away from its sorted-window position before train 1,
+  # moving in steps during trains 3-8 and within ~5 um only from train 7's step on. So the laser window is
+  # interpolated into the sorted window's frame before matching. Check run without correction, train 8 only:
+  # configs/e097_optotag_train8_uncorrected.yaml.
+  correct_motion: true
+  job_kwargs: {n_jobs: 3, chunk_duration: 1s, progress_bar: true}   # each wobble worker holds ~4 GB
+
+response:
+  # Trains 1-2 (no movement during the train) and 8 (~7 um) give the pooled metrics and the class. Trains 3-7 moved
+  # 5-25 um in the first 0-4 s, i.e. during most of their pulses: reported per train and as secondary.
+  primary_trains: [1, 2, 8]
+
+report:
+  compare_with: ${outputs}/e097/optotag_laser_window_train8_uncorrected
+
+job_kwargs:
+  n_jobs: 8   # another sort may share the machine
+  chunk_duration: 1s
+  progress_bar: true

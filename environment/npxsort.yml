@@ -1,0 +1,12 @@
+# Fresh environment for npxsort. Create it, then install torch (CUDA build) BEFORE npxsort-requirements.txt (from the repository root):
+#   conda env create -f environment/npxsort.yml
+#   conda activate npxsort
+#   pip install torch --index-url https://download.pytorch.org/whl/cu126     (pick your CUDA build on pytorch.org)
+#   pip install -r environment/npxsort-requirements.txt
+#   python sorting/check_env.py
+name: npxsort
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
