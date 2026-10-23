@@ -194,7 +194,7 @@ def build_window_figure(
     for plot_idx, (ch, d_um, orig_idx) in enumerate(chan_depth_pairs):
         y_base = offsets[plot_idx]
         y_tr = traces[orig_idx] + y_base
-        is_peak = (ch == peak_chan)
+        is_peak = (ch == peak_channel)
         if is_peak:
             peak_y_base = y_base
 
@@ -219,7 +219,7 @@ def build_window_figure(
                 y=spk_y,
                 mode="markers",
                 marker=dict(symbol="circle", size=7, color="#ef4444", line=dict(color="#ffffff", width=0.8)),
-                name=f"Spikes (Ch {peak_chan})",
+                name=f"Spikes (Ch {peak_channel})",
                 hoverinfo="x+y"
             )
         )
@@ -251,7 +251,7 @@ def build_window_figure(
         tickmode="array",
         tickvals=offsets,
         ticktext=[
-            f"<b>Ch {ch}</b> ({d_um:.0f}um){'<br>[PEAK]' if ch == peak_chan else ''}"
+            f"<b>Ch {ch}</b> ({d_um:.0f}um){'<br>[PEAK]' if ch == peak_channel else ''}"
             for ch, d_um, _ in chan_depth_pairs
         ],
         title_text="Electrode Contacts",

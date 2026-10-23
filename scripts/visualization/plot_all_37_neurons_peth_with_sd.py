@@ -20,7 +20,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 # Add project root to sys.path
-PROJECT_ROOT = Path(__file__).parent.parent
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.pipeline.io.io_nidq import read_nidq_bin
@@ -193,13 +193,14 @@ def main():
 
     # 5. Generate Interactive HTML Plotly Grid
     subplot_titles = [f"Unit #{p['cluster_id']} ({p['depth_um']:.0f}µm)" for p in peth_stats]
+    vert_spacing = min(0.04, 0.7 / max(1, n_rows - 1))
     fig_plotly = make_subplots(
         rows=n_rows,
         cols=n_cols,
         subplot_titles=subplot_titles,
         shared_xaxes=True,
         horizontal_spacing=0.03,
-        vertical_spacing=0.06
+        vertical_spacing=vert_spacing
     )
 
     for idx, p in enumerate(peth_stats):
@@ -272,12 +273,13 @@ def main():
     fig_plotly.write_html(str(out_html))
     logger.info(f"Saved Interactive HTML Grid: {out_html.resolve()}")
 
-    # Also copy to root publication figures for convenience
+    # Also copy to root publication figures for convenience if folder exists
     copy_dst_png = PROJECT_ROOT / "output_publication_figures_LP21_60s" / "all_37_neurons_peth_mean_sd.png"
     copy_dst_html = PROJECT_ROOT / "output_publication_figures_LP21_60s" / "all_37_neurons_peth_mean_sd_interactive.html"
-    import shutil
-    shutil.copy2(out_png, copy_dst_png)
-    shutil.copy2(out_html, copy_dst_html)
+    if copy_dst_png.parent.exists():
+        import shutil
+        shutil.copy2(out_png, copy_dst_png)
+        shutil.copy2(out_html, copy_dst_html)
 
     print("\n" + "=" * 85)
     print(" [SUCCESS] ALL 37 NEURONS PETH MEAN + SD REGENERATED (SYNCHRONIZED)")

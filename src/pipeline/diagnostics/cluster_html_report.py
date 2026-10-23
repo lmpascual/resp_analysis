@@ -418,12 +418,15 @@ def generate_single_unit_html(bundle: UnitValidationBundle, output_path: Path) -
     snip = bundle.trace_snippet
     snip_t0 = snip.t_start_s if snip else 0.0
     snip_t1 = snip.t_end_s if snip else 1.5
-
-    qc_badge = (
-        '<span style="background-color:#10b981;color:#ffffff;padding:4px 10px;border-radius:12px;font-weight:600;font-size:0.85rem;">PASS (Allen QC)</span>'
-        if bundle.passed_allen_qc else
-        f'<span style="background-color:#ef4444;color:#ffffff;padding:4px 10px;border-radius:12px;font-weight:600;font-size:0.85rem;" title="{getattr(bundle, "qc_summary", "QC Flagged")}">FAIL ({getattr(bundle, "qc_summary", "QC Flagged")})</span>'
-    )
+    custom_badge = getattr(bundle, "custom_badge_html", None)
+    if custom_badge:
+        qc_badge = custom_badge
+    else:
+        qc_badge = (
+            '<span style="background-color:#10b981;color:#ffffff;padding:4px 10px;border-radius:12px;font-weight:600;font-size:0.85rem;">PASS (Allen QC)</span>'
+            if bundle.passed_allen_qc else
+            f'<span style="background-color:#ef4444;color:#ffffff;padding:4px 10px;border-radius:12px;font-weight:600;font-size:0.85rem;" title="{getattr(bundle, "qc_summary", "QC Flagged")}">FAIL ({getattr(bundle, "qc_summary", "QC Flagged")})</span>'
+        )
 
     n_ch = len(snip.channels) if snip else 0
     if snip:
@@ -446,12 +449,13 @@ def generate_single_unit_html(bundle: UnitValidationBundle, output_path: Path) -
     has_spk = bool(snip and len(snip.aligned_trough_times) > 0)
     has_viol = bool(snip and hasattr(snip, "violation_trough_times") and len(snip.violation_trough_times) > 0)
 
+    cli_dir = getattr(bundle, "custom_cli_dir", "outputs/LP21/LP21_fent_EXPT_g1_60s_120s_lupin_run")
     if isi.n_violations == 0:
         viol_summary_html = '<span style="color:#10b981;font-weight:600;">0 Violations (Clean single-unit isolation, Q = 0.000)</span>'
-        cli_window_cmd = f"python scripts/visualization/generate_cluster_trace_window.py --output-dir outputs/LP21/LP21_fent_EXPT_g1_60s_120s_lupin_run --unit {bundle.cluster_id} --t-start {max(0.0, snip_t0):.1f} --duration 3.0 --open"
+        cli_window_cmd = f"python scripts/visualization/generate_cluster_trace_window.py --output-dir {cli_dir} --unit {bundle.cluster_id} --t-start {max(0.0, snip_t0):.1f} --duration 3.0 --open"
     else:
         viol_summary_html = f'<span style="color:#d97706;font-weight:600;">{isi.n_violations} Violations (&lt; {isi.refractory_ms:.1f} ms, Q = {isi.violation_rate_q:.3f})</span>'
-        cli_window_cmd = f"python scripts/visualization/generate_cluster_trace_window.py --output-dir outputs/LP21/LP21_fent_EXPT_g1_60s_120s_lupin_run --unit {bundle.cluster_id} --violation 1 --open" 
+        cli_window_cmd = f"python scripts/visualization/generate_cluster_trace_window.py --output-dir {cli_dir} --unit {bundle.cluster_id} --violation 1 --open"
 
     html_content = f"""<!DOCTYPE html>
 <html lang="en">

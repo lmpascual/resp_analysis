@@ -146,12 +146,21 @@ def run_sliding_window_sorting(
                     verbose=False
                 )
             elif sorter_name == "kilosort4":
+                ks_cfg = getattr(config, "kilosort4", getattr(config, "kilosort", None))
+                th_u = getattr(ks_cfg, "Th_universal", 9) if ks_cfg else 9
+                th_l = getattr(ks_cfg, "Th_learned", 8) if ks_cfg else 8
+                do_car = getattr(ks_cfg, "do_CAR", config.sorters.do_CAR) if ks_cfg else config.sorters.do_CAR
+                nblocks = getattr(ks_cfg, "nblocks", 1) if ks_cfg else 1
+                batch_size = getattr(ks_cfg, "batch_size", 60000) if ks_cfg else 60000
                 sorting = si.run_sorter(
                     sorter_name="kilosort4",
                     recording=rec_slice_saved,
                     folder=win_dir / "si_output",
-                    Th_universal=8,
-                    Th_learned=7,
+                    Th_universal=th_u,
+                    Th_learned=th_l,
+                    do_CAR=do_car,
+                    nblocks=nblocks,
+                    batch_size=batch_size,
                     verbose=False
                 )
 

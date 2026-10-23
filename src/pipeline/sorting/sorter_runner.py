@@ -26,6 +26,8 @@ def run_single_sorter(
     scratch_dir: Path,
     config: Optional[SorterConfig] = None,
     lupin_config: Optional[LupinConfig] = None,
+    kilosort4_config: Optional[Any] = None,
+    custom_sorter_dir: Optional[Path] = None,
     verbose: bool = True
 ) -> Tuple[si.BaseSorting, pd.DataFrame, float]:
     """
@@ -33,7 +35,7 @@ def run_single_sorter(
     """
     config = config or SorterConfig()
     sorter_name = sorter_name.lower().strip()
-    out_sorter_dir = output_dir / sorter_name
+    out_sorter_dir = custom_sorter_dir if custom_sorter_dir is not None else (output_dir / sorter_name)
     scratch_sorter_dir = scratch_dir / f"{sorter_name}_working"
     
     out_sorter_dir.mkdir(parents=True, exist_ok=True)
@@ -47,8 +49,17 @@ def run_single_sorter(
     t0 = time.time()
 
     if sorter_name == "kilosort4":
+        th_u = getattr(kilosort4_config, "Th_universal", 9) if kilosort4_config else 9
+        th_l = getattr(kilosort4_config, "Th_learned", 8) if kilosort4_config else 8
+        do_car = getattr(kilosort4_config, "do_CAR", config.do_CAR) if kilosort4_config else config.do_CAR
+        nblocks = getattr(kilosort4_config, "nblocks", 1) if kilosort4_config else 1
+        batch_size = getattr(kilosort4_config, "batch_size", 60000) if kilosort4_config else 60000
         ks4_params = dict(
-            do_CAR=config.do_CAR,
+            do_CAR=do_car,
+            Th_universal=th_u,
+            Th_learned=th_l,
+            nblocks=nblocks,
+            batch_size=batch_size,
             do_correction=True,
             save_extra_vars=True
         )
@@ -136,7 +147,8 @@ def run_multi_sorter_suite(
     base_out_dir: Path,
     scratch_dir: Path,
     config: Optional[SorterConfig] = None,
-    lupin_config: Optional[LupinConfig] = None
+    lupin_config: Optional[LupinConfig] = None,
+    kilosort4_config: Optional[Any] = None
 ) -> Dict[str, Dict[str, Any]]:
     """
     Executes a list of spike sorters sequentially and compiles comparative outputs.
@@ -153,7 +165,8 @@ def run_multi_sorter_suite(
                 output_dir=base_out_dir,
                 scratch_dir=scratch_dir,
                 config=config,
-                lupin_config=lupin_config
+                lupin_config=lupin_config,
+                kilosort4_config=kilosort4_config
             )
             results[name_clean] = {
                 "sorting": sorting_obj,

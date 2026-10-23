@@ -17,11 +17,13 @@ import scipy.signal as signal
 
 @dataclass
 class FlowProcessingResult:
-    flow_zero_crossings: np.ndarray  # Time (s) of mechanical expiration onset (zero flow transition)
-    flow_troughs: np.ndarray         # Time (s) of peak inspiratory flow velocity (flow minimum)
-    flow_filtered: np.ndarray        # 50 Hz low-pass filtered airflow signal (V)
-    flow_derivative: np.ndarray      # Airflow acceleration (V/s)
-    dt_flow_zc_minus_emg_ms: np.ndarray  # Difference between flow ZC and EMG offset (ms)
+    flow_zero_crossings: np.ndarray       # Time (s) of mechanical flow zero-crossing transition
+    flow_troughs: np.ndarray              # Time (s) of peak inspiration (minimum of negative deflection / slope inversion)
+    peak_inspirations: np.ndarray         # Alias: Time (s) of peak inspiration where slope transitions from negative to positive
+    inspiration_offsets: np.ndarray       # Time (s) of inspiration-off detected by integrated diaphragm EMG burst offset
+    flow_filtered: np.ndarray             # 50 Hz low-pass filtered airflow signal (V)
+    flow_derivative: np.ndarray           # Airflow acceleration / slope (V/s)
+    dt_flow_zc_minus_emg_ms: np.ndarray   # Difference between flow ZC and diaphragm EMG offset (ms)
 
 
 def process_flow_meter(
@@ -33,32 +35,15 @@ def process_flow_meter(
     lowpass_cutoff: float = 50.0
 ) -> FlowProcessingResult:
     """
-    Extracts mechanical expiration landmarks from the pneumotachograph flow signal.
-
-    Parameters:
-    -----------
-    flow_raw : np.ndarray
-        Raw analog voltage signal from Channel 5.
-    time_vector : np.ndarray
-        Continuous time array matching flow_raw.
-    valid_onsets : np.ndarray
-        Breath onsets (s) from Diaphragm EMG.
-    valid_offsets : np.ndarray
-        Burst offsets (s) from Diaphragm EMG.
-    fs : float
-        Sampling frequency in Hz (default: 10000.0).
-    lowpass_cutoff : float
-        Low-pass filter cutoff in Hz (default: 50.0).
-
-    Returns:
-    --------
-    FlowProcessingResult
+    Extracts mechanical respiratory landmarks from the pneumotachograph flow signal:
+    - Peak inspiration is detected when the airflow signal changes from negative deflection to positive slope (flow minimum).
+    - Inspiration-off (I_off) is determined from the integrated diaphragm EMG burst offset (valid_offsets).
     """
     # 1. 2nd-order low-pass Butterworth filter at lowpass_cutoff
     b, a = signal.butter(2, lowpass_cutoff / (fs / 2.0), btype="low")
     flow_lp = signal.filtfilt(b, a, flow_raw)
 
-    # First derivative (acceleration)
+    # First derivative (slope / acceleration)
     dt = 1.0 / fs
     flow_deriv = np.gradient(flow_lp, dt)
 
@@ -71,9 +56,11 @@ def process_flow_meter(
         t_off_emg = valid_offsets[i]
         t_next = valid_onsets[i + 1] if i + 1 < n_breaths else t_off_emg + 0.35
 
-        # Search window for inspiratory trough: t_on to min(t_on + 0.30s, t_next)
-        t_search_end = min(t_on + 0.30, t_next)
-        idx_win = np.where((time_vector >= t_on) & (time_vector <= t_search_end))[0]
+        # Search window for peak inspiration: bounded around the inspiratory burst
+        # where the slope changes from negative deflection to positive slope
+        t_search_start = max(0.0, t_on - 0.015)
+        t_search_end = min(t_off_emg + 0.05, t_next - 0.01) if t_next > t_off_emg else t_off_emg + 0.05
+        idx_win = np.where((time_vector >= t_search_start) & (time_vector <= t_search_end))[0]
 
         if len(idx_win) > 2:
             min_local_idx = idx_win[np.argmin(flow_lp[idx_win])]
@@ -103,7 +90,7 @@ def process_flow_meter(
                 zc_found = True
 
         if not zc_found:
-            # High-fidelity fallback to EMG offset if no zero-crossing occurred
+            # Fallback to EMG offset if no zero-crossing occurred (e.g. elevated baseline)
             flow_zero_crossings[i] = t_off_emg
 
     dt_diff_ms = (flow_zero_crossings - valid_offsets) * 1000.0
@@ -111,6 +98,8 @@ def process_flow_meter(
     return FlowProcessingResult(
         flow_zero_crossings=flow_zero_crossings,
         flow_troughs=flow_troughs,
+        peak_inspirations=flow_troughs,
+        inspiration_offsets=valid_offsets,
         flow_filtered=flow_lp,
         flow_derivative=flow_deriv,
         dt_flow_zc_minus_emg_ms=dt_diff_ms

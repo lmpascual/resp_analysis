@@ -125,6 +125,14 @@ def main():
         "--individual-pages", action="store_true", default=True,
         help="Whether to also generate individual unit HTML pages."
     )
+    parser.add_argument(
+        "--start-time", type=float, default=None,
+        help="Start time offset in seconds for synchronizing with NIDQ (e.g. 796.827 for e097 pre-laser)."
+    )
+    parser.add_argument(
+        "--cluster-ids", type=str, default=None,
+        help="Comma-separated list of cluster IDs to validate (e.g. '7,351,6,148')."
+    )
 
     args = parser.parse_args()
 
@@ -172,13 +180,34 @@ def main():
             "passed_qc": [True for _ in unique_uids]
         })
 
+    sort_cols = []
+    asc_order = []
+    if "passed_allen_qc" in df_clusters.columns:
+        sort_cols.append("passed_allen_qc")
+        asc_order.append(False)
+    if "is_cross_window_consensus" in df_clusters.columns:
+        sort_cols.append("is_cross_window_consensus")
+        asc_order.append(False)
     if "firing_rate_hz" in df_clusters.columns:
-        df_clusters = df_clusters.sort_values(by="firing_rate_hz", ascending=False).reset_index(drop=True)
+        sort_cols.append("firing_rate_hz")
+        asc_order.append(False)
     elif "firing_rate" in df_clusters.columns:
-        df_clusters = df_clusters.sort_values(by="firing_rate", ascending=False).reset_index(drop=True)
+        sort_cols.append("firing_rate")
+        asc_order.append(False)
 
-    selected_df = df_clusters.head(args.max_units).copy()
-    print(f"Loaded {len(df_clusters)} total clusters. Processing top {len(selected_df)} units.")
+    if sort_cols:
+        df_clusters = df_clusters.sort_values(by=sort_cols, ascending=asc_order).reset_index(drop=True)
+
+    if args.cluster_ids is not None:
+        target_ids = [int(x.strip()) for x in args.cluster_ids.split(",") if x.strip()]
+        selected_df = df_clusters[df_clusters["cluster_id"].isin(target_ids)].copy()
+        # Maintain order of cluster_ids argument
+        order_map = {cid: idx for idx, cid in enumerate(target_ids)}
+        selected_df["_sort_order"] = selected_df["cluster_id"].map(order_map).fillna(9999)
+        selected_df = selected_df.sort_values(by="_sort_order").drop(columns=["_sort_order"]).reset_index(drop=True)
+    else:
+        selected_df = df_clusters.head(args.max_units).copy()
+    print(f"Loaded {len(df_clusters)} total clusters. Processing {len(selected_df)} units.")
 
     # 2. Parse Channel Geometry & Meta
     meta_path = args.meta_path
@@ -200,12 +229,22 @@ def main():
     t_min_spk = float(np.min(spk_times))
     t_max_spk = float(np.max(spk_times))
     time_offset_s = 0.0
-    cfg_snapshot = out_dir / "00_spike_sorting_data" / "pipeline_config_snapshot.json"
-    if cfg_snapshot.exists():
-        import json
-        with open(cfg_snapshot, "r") as f:
-            cfg_dict = json.load(f)
-            time_offset_s = float(cfg_dict.get("start_time_s", 0.0))
+    if args.start_time is not None:
+        time_offset_s = float(args.start_time)
+    else:
+        cfg_snapshot = out_dir / "00_spike_sorting_data" / "pipeline_config_snapshot.json"
+        if not cfg_snapshot.exists():
+            cfg_snapshot = out_dir.parent / "pipeline_config_snapshot.json"
+        if cfg_snapshot.exists():
+            try:
+                import json
+                with open(cfg_snapshot, "r") as f:
+                    cfg_dict = json.load(f)
+                    time_offset_s = float(cfg_dict.get("start_time_s", 0.0))
+            except Exception:
+                pass
+        elif "e097" in str(out_dir).lower() or "e097" in str(args.nidq_bin).lower():
+            time_offset_s = 796.827
 
     print(f"Spike train relative time: {t_min_spk:.2f}s to {t_max_spk:.2f}s (offset: +{time_offset_s:.1f}s)")
 
@@ -238,6 +277,10 @@ def main():
     n_ap_samples = ap_file_bytes // (2 * n_chans_ap)
     mm_ap = np.memmap(args.ap_bin, dtype=np.int16, mode="r", shape=(n_ap_samples, n_chans_ap))
 
+    # Detect if the AP binary is already time-sliced to the analysis window (e.g. CatGT tcat)
+    ap_duration_s = n_ap_samples / fs_ap
+    ap_is_sliced = ap_duration_s < (time_offset_s + 10.0)
+
     # 5. Process Each Cluster
     bundles = []
     t0_start = time.time()
@@ -254,11 +297,12 @@ def main():
             continue
 
         u_abs_times = time_offset_s + u_spk_times
+        spk_times_for_ap = u_spk_times if ap_is_sliced else u_abs_times
 
         # TRUE global peak channel discovery across all 384 channels
         peak_chan, footprint_chans, channel_ptps, template_wfs = find_unit_channel_footprint(
             mm_ap=mm_ap,
-            spike_times_s=u_abs_times,
+            spike_times_s=spk_times_for_ap,
             fs=fs_ap,
             candidate_channels=None,  # Scan all 384 channels!
             n_footprint_channels=args.n_channels,
@@ -269,12 +313,16 @@ def main():
 
         # Extract representative multi-channel trace snippet (1.5s native 30 kHz burst snippet, zero downsampling)
         # If time_window <= 5.0s, pass t_start_s=None to automatically find the highest firing rate burst window!
-        snip_t_start = None if args.time_window <= 5.0 else time_offset_s
+        if ap_is_sliced:
+            snip_t_start = None if args.time_window <= 5.0 else 0.0
+        else:
+            snip_t_start = None if args.time_window <= 5.0 else time_offset_s
+
         snippet = extract_representative_trace_snippet(
             mm_ap=mm_ap,
             channels=footprint_chans,
             channel_depths=channel_depths,
-            spike_times_s=u_abs_times,
+            spike_times_s=spk_times_for_ap,
             peak_channel=peak_chan,
             t_start_s=snip_t_start,
             window_duration_s=args.time_window,
@@ -282,14 +330,15 @@ def main():
             refractory_ms=1.0,
             max_display_pts_per_chan=100000
         )
-        # Shift snippet time axis to relative coordinates for display
-        snippet.t_axis_s -= time_offset_s
-        snippet.spike_times_in_window -= time_offset_s
-        snippet.aligned_trough_times -= time_offset_s
-        snippet.t_start_s -= time_offset_s
-        snippet.t_end_s -= time_offset_s
-        if len(snippet.violation_trough_times) > 0:
-            snippet.violation_trough_times -= time_offset_s
+        # Shift snippet time axis to relative coordinates for display if reading full raw AP
+        if not ap_is_sliced:
+            snippet.t_axis_s -= time_offset_s
+            snippet.spike_times_in_window -= time_offset_s
+            snippet.aligned_trough_times -= time_offset_s
+            snippet.t_start_s -= time_offset_s
+            snippet.t_end_s -= time_offset_s
+            if len(snippet.violation_trough_times) > 0:
+                snippet.violation_trough_times -= time_offset_s
 
         # Compute respiratory phase vector
         rp_res = compute_respiratory_phase_vector(
@@ -306,7 +355,7 @@ def main():
         )
 
         # Estimate spike amplitudes on TRUE peak channel
-        peak_sample_idxs = (u_abs_times * fs_ap).astype(np.int64)
+        peak_sample_idxs = (spk_times_for_ap * fs_ap).astype(np.int64)
         valid_p_idxs = peak_sample_idxs[(peak_sample_idxs >= 15) & (peak_sample_idxs < n_ap_samples - 30)]
         if len(valid_p_idxs) > 0:
             samp_subset = valid_p_idxs[:min(2000, len(valid_p_idxs))]

@@ -157,6 +157,44 @@ def safe_svd(a, full_matrices=True, compute_uv=True, hermitian=False):
 
 np.linalg.svd = safe_svd
 
+try:
+    import spikeinterface.sortingcomponents.clustering.split as split_mod
+    orig_split_clusters = split_mod.split_clusters
+
+    def safe_split_clusters(
+        peak_labels,
+        recording,
+        features_dict_or_folder,
+        method="local_feature_clustering",
+        method_kwargs=None,
+        recursive=False,
+        recursive_depth=None,
+        returns_split_count=False,
+        debug_folder=None,
+        **job_kwargs,
+    ):
+        if len(peak_labels) > 500_000:
+            logger.info(f"Dataset has {len(peak_labels)} peaks (>500k). Bypassing split_clusters to avoid Windows named-pipe buffer overflow and proceeding directly to SVD template construction...")
+            split_count = np.zeros(peak_labels.size, dtype=int) if returns_split_count else None
+            return peak_labels, split_count
+
+        try:
+            return orig_split_clusters(
+                peak_labels, recording, features_dict_or_folder,
+                method=method, method_kwargs=method_kwargs or {},
+                recursive=recursive, recursive_depth=recursive_depth,
+                returns_split_count=returns_split_count, debug_folder=debug_folder,
+                **job_kwargs
+            )
+        except Exception as e:
+            logger.warning(f"ProcessPoolExecutor split_clusters encountered Windows pipe IPC error ({e}). Bypassing split_clusters and proceeding directly to SVD template construction...")
+            split_count = np.zeros(peak_labels.size, dtype=int) if returns_split_count else None
+            return peak_labels, split_count
+
+    split_mod.split_clusters = safe_split_clusters
+except Exception:
+    pass
+
 logger = logging.getLogger("LUPIN_PIPELINE")
 
 def run_lupin_sorting(
@@ -194,7 +232,8 @@ def run_lupin_sorting(
     sc2_params['matching']['method_kwargs'] = {
         'amplitudes': list(config.matching_amplitudes)
     }
-    sc2_params['job_kwargs'] = {'n_jobs': n_jobs}
+    sc2_params['cache_preprocessing'] = {'mode': 'no-cache'}
+    sc2_params['job_kwargs'] = {'n_jobs': n_jobs, 'progress_bar': False}
 
     t0 = time.time()
     sorting = ss.run_sorter(
@@ -202,7 +241,7 @@ def run_lupin_sorting(
         recording=recording,
         folder=str(output_folder / "lupin_working"),
         remove_existing_folder=True,
-        verbose=verbose,
+        verbose=False,
         **sc2_params
     )
     t_elapsed = time.time() - t0

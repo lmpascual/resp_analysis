@@ -101,7 +101,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("INTERACTIVE_SORTER_RASTER")
 
-def build_interactive_sorter_raster(sorter_dir: Path, sorter_name: str = None, bin_size_ms: float = 20.0):
+def build_interactive_sorter_raster(sorter_dir: Path, sorter_name: str = None, bin_size_ms: float = 20.0, start_t_s: float = None):
     sorter_dir = Path(sorter_dir)
     if not sorter_dir.exists():
         p_str = str(sorter_dir).replace('"', '').replace("'", "")
@@ -119,7 +119,7 @@ def build_interactive_sorter_raster(sorter_dir: Path, sorter_name: str = None, b
     if sorter_name is None:
         sorter_name = sorter_dir.name
         
-    sorter_name_clean = sorter_name.replace(" ", "_").lower()
+    sorter_name_clean = sorter_name.replace(" ", "_").replace("/", "-").replace("\\", "-").replace(":", "-").lower()
     
     # Locate QC summary or cluster_info.tsv
     qc_csv = None
@@ -231,12 +231,42 @@ def build_interactive_sorter_raster(sorter_dir: Path, sorter_name: str = None, b
             fs_nidq = 10000.0
             
             # Synchronize start time offset if sliced run
-            if "e097" in str(sorter_dir).lower() or "e097" in str(nidq_file).lower():
-                start_t_s = 796.827
-            elif "60s_120s" in str(sorter_dir) or "60s_120s" in str(sorter_dir.parent):
-                start_t_s = 60.0
-            else:
-                start_t_s = 0.0
+            if start_t_s is None:
+                subwin_map = {
+                    "win1_baseline": 1740.0,
+                    "win2_anox1": 1800.0,
+                    "win3_anox2": 1836.0,
+                    "win4_gasp_early": 1860.0,
+                    "win5_gasp_late": 1950.0,
+                    "win6_flow_shift": 2070.0,
+                    "win7_recovery": 2136.0,
+                }
+                for w_id, t_val in subwin_map.items():
+                    if w_id in str(sorter_dir).lower() or (sorter_name and w_id in str(sorter_name).lower()):
+                        start_t_s = t_val
+                        break
+
+            if start_t_s is None:
+                # Check for subwindow benchmark JSON or manifest in parent directory
+                for bm_cand in list(sorter_dir.glob("*benchmark*.json")) + list(sorter_dir.parent.glob("*benchmark*.json")):
+                    try:
+                        with open(bm_cand, "r", encoding="utf-8") as f_bm:
+                            bm_data = json.load(f_bm)
+                            if "subwindow" in bm_data and "t_start" in bm_data["subwindow"]:
+                                start_t_s = float(bm_data["subwindow"]["t_start"])
+                                break
+                    except Exception:
+                        pass
+
+            if start_t_s is None:
+                if "prelaser" in str(sorter_dir).lower() or (sorter_name and "prelaser" in str(sorter_name).lower()):
+                    start_t_s = 796.827
+                elif "60s_120s" in str(sorter_dir) or "60s_120s" in str(sorter_dir.parent):
+                    start_t_s = 60.0
+                else:
+                    start_t_s = 0.0
+
+            logger.info(f"Target subwindow NIDQ synchronization offset start_t_s = {start_t_s:.3f}s (duration = {duration_s:.3f}s)")
             start_samp = int(start_t_s * fs_nidq)
             n_samp_total = int(duration_s * fs_nidq)
             

@@ -86,6 +86,16 @@ class LupinConfig:
     ms_after: float = 2.0
     templates_from_svd: bool = True
     matching_amplitudes: List[float] = field(default_factory=lambda: [0.6, 2.0])
+@dataclass
+class Kilosort4Config:
+    enabled: bool = True
+    Th_universal: float = 9.0
+    Th_learned: float = 8.0
+    do_CAR: bool = False
+    nblocks: int = 1
+    batch_size: int = 60000
+    nt: int = 61
+    duplicate_spike_ms: float = 0.25
 
 @dataclass
 class SlidingWindowConfig:
@@ -127,6 +137,7 @@ class PipelineConfig:
     sliding_window: SlidingWindowConfig = field(default_factory=SlidingWindowConfig)
     sorters: SorterConfig = field(default_factory=SorterConfig)
     lupin: LupinConfig = field(default_factory=LupinConfig)
+    kilosort4: Kilosort4Config = field(default_factory=Kilosort4Config)
 
     def to_dict(self) -> Dict[str, Any]:
         d = asdict(self)
@@ -155,6 +166,8 @@ class PipelineConfig:
         sliding_cfg = SlidingWindowConfig(**data.get('sliding_window', {}))
         sorters_cfg = SorterConfig(**data.get('sorters', {}))
         lupin_cfg = LupinConfig(**data.get('lupin', {}))
+        ks4_data = data.get('kilosort4', data.get('kilosort', {}))
+        ks4_cfg = Kilosort4Config(**ks4_data)
         return cls(
             animal_id=data.get('animal_id', 'subject_01'),
             session_id=data.get('session_id', 'session_01'),
@@ -171,5 +184,6 @@ class PipelineConfig:
             motion=motion_cfg,
             sliding_window=sliding_cfg,
             sorters=sorters_cfg,
-            lupin=lupin_cfg
+            lupin=lupin_cfg,
+            kilosort4=ks4_cfg
         )

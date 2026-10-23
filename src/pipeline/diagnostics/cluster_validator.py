@@ -248,7 +248,9 @@ def compute_respiratory_phase_vector(
     cycle_next_onsets = breath_onsets[1:n_cycles + 1]
 
     cycle_indices = np.searchsorted(cycle_next_onsets, spike_times_s)
-    valid_mask = (cycle_indices < n_cycles) & (spike_times_s >= cycle_onsets[cycle_indices])
+    valid_mask = cycle_indices < n_cycles
+    if np.any(valid_mask):
+        valid_mask[valid_mask] = spike_times_s[valid_mask] >= cycle_onsets[cycle_indices[valid_mask]]
 
     valid_spk_times = spike_times_s[valid_mask]
     valid_cycles = cycle_indices[valid_mask]
