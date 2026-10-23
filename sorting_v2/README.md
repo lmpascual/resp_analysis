@@ -226,8 +226,53 @@ The footprint-mismatch flag in the browser now also flags **polarity reversals**
 largest-channel deflection has the opposite sign to the unit's template. That is how the 26
 gasping spikes looked inside #361.
 
+**Removing spikes from a unit** (`curation.remove_spikes`; see `npxsort/remove.py`).
+
+When a unit is right except for a few spikes of another neuron, a rule removes that unit's spikes in
+a time window: all of them, or only those the review browser flags (`only_flagged: [footprint_mismatch]`
+and/or `duplicate`). Unlike a Phy split, the removal reaches `units.tsv`, ALF, the analyzer, the Phy
+export and the browser, and is redone on every rerun. Unit ids don't change. Add the rule, then run
+`--redo postprocess`.
+
+```yaml
+curation:
+  remove_spikes:
+    - sorter: kilosort4
+      unit_id: 435             # units.tsv / browser id, not Phy's cluster_id
+      start_s: 242.5           # file time (as in ALF and the browser); start <= t < end
+      end_s: 242.8
+      reason: "6 spikes of a smaller neighbour"
+      expect_removed: 6        # optional: stop the run if a different number would be removed
+```
+
+Each removed spike is listed in `<sorter>/removed_spikes.tsv`, the counts per rule are in
+`postprocessing_report.json`, and `units.tsv` (and Phy's ClusterView) get a `removed_spikes` column.
+`expect_removed` also guards against a redone sort: Kilosort's ids would then belong to different
+neurons, and the run stops instead of cutting the wrong unit.
+
 **Phy:** see `docs/phy_tutorial.md`. Phy edits stay in the `phy` folder and are not read back by
-the pipeline or the browser.
+the pipeline or the browser; use `curation.remove_spikes` for removals the analyses should see.
+
+**Finding absorbed neurons: the epoch outlier screen** (`epoch_outliers.py`; not a pipeline stage).
+
+A neuron recruited only in one state (e.g. gasping) can end up inside another unit. If its pattern
+across channels is close to a scaled copy of the host's, the browser's footprint-mismatch flag misses it.
+That happened with KS4 #293's 30 gasping spikes of a cell 4x bigger on ch 53. The screen compares each spike's unscaled amplitude
+on the unit's top 4 channels with the unit's own baseline epoch (robust z, median/MAD). It then lists:
+- units whose other epochs, or densest 10-s window, hold far more |z| > 5 outliers than baseline;
+- whether those form a separate cluster (2- vs 1-component mixture, BIC, separation);
+- which other units share the same outlier events.
+
+```bat
+python epoch_outliers.py C:\Users\lpascu\resp_analysis\outputs\e097\intact_window_v2 --time-offset-s 1740 ^
+    --out C:\Users\lpascu\resp_analysis\outputs\e097\epoch_outliers\intact_window_v2_kilosort4
+```
+
+Outputs `candidates.tsv` (ranked; tier "separate population" first), `unit_epochs.tsv`, `outlier_spikes.tsv`
+and a figure per top candidate (amplitude vs time per channel, coloured by epoch). It only flags units and spikes for
+review and never changes the sorting. Gasping can change a neuron's own amplitude, and gasp volleys cause
+collisions, so check each candidate in the review browser. Fix confirmed cases with `curation.extract_units` or
+`curation.remove_spikes`. The definitions are in the script's docstring.
 
 ## Run summaries and analysis records
 

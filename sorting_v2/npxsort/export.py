@@ -55,6 +55,9 @@ def write_phy(analyzer, table: pd.DataFrame, out_dir: Path, job_kwargs: dict) ->
     groups.to_csv(phy / "cluster_group.tsv", sep="\t", index=False)
     bc = pd.DataFrame({"cluster_id": np.arange(len(analyzer.unit_ids)), "bombcell": table.loc[analyzer.unit_ids, "label"].to_numpy()})
     bc.to_csv(phy / "cluster_bombcell.tsv", sep="\t", index=False)
+    if "removed_spikes" in table.columns:  # spikes taken out by curation.remove_spikes, shown as a ClusterView column
+        rm = pd.DataFrame({"cluster_id": np.arange(len(analyzer.unit_ids)), "removed_spikes": table.loc[analyzer.unit_ids, "removed_spikes"].to_numpy()})
+        rm.to_csv(phy / "cluster_removed_spikes.tsv", sep="\t", index=False)
 
 
 def write_report(analyzer, out_dir: Path, job_kwargs: dict) -> None:

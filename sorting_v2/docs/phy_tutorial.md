@@ -11,6 +11,9 @@ version's source (`...\envs\cibrrig\Lib\site-packages\phy`).
   browser (`review_units.py`) and the inspection workbook don't see Phy edits.
 - **Re-exporting overwrites them.** Re-running the pipeline's `export` stage (for example
   `--redo postprocess`) rewrites the `phy` folder. Copy the folder first if you've curated in it.
+- **To remove spikes for the analyses, use the config instead.** `curation.remove_spikes` (see the
+  README and `npxsort/remove.py`) removes a unit's spikes in a time window inside the pipeline, so
+  `units.tsv`, ALF, the browser and the next Phy export all have the change, and it survives reruns.
 - **Unit numbers differ.** Phy renumbers clusters at export, so Phy's `cluster_id` isn't the
   `unit_id` in `units.tsv` or the review browser. The **`si_unit_id`** column gives the mapping.
   After you split or merge, the resulting clusters get new ids and have no `si_unit_id`.

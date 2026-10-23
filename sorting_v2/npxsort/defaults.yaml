@@ -71,6 +71,7 @@ curation:
   threshold_overrides: {}         # {section: {metric: {greater: x, less: y}}} merged over the bombcell defaults
   merge_suggestions: true         # write likely over-split pairs to a table for review (never applied automatically)
   extract_units: []               # hand-defined units pulled out of the sorters' output; see npxsort/extract.py
+  remove_spikes: []               # hand-picked spikes removed from a unit (time window, optionally only flagged spikes); see npxsort/remove.py
 
 # Named periods (file time, s) compared by the epoch-stability stage: for every unit, does its spatial
 # footprint and waveform stay the same from one epoch to another? Writes <sorter>/epoch_stability.tsv,

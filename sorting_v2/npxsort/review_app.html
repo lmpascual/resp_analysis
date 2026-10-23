@@ -65,6 +65,14 @@
     border: 1px solid #fecaca; padding: 6px 12px; border-radius: 6px; display: none; z-index: 11; }
   .muted { color: var(--muted); }
   .spin { color: var(--accent); }
+  #shapes { position: fixed; inset: 52px 348px 10px 258px; background: #fff; border: 1px solid var(--line); border-radius: 10px;
+    box-shadow: 0 10px 40px rgba(0,0,0,.15); z-index: 9; display: flex; flex-direction: column; }
+  #shapes[hidden] { display: none; }
+  #shapes .bar { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; padding: 6px 10px; border-bottom: 1px solid var(--line); }
+  #shapesWrap { flex: 1; min-height: 0; overflow: auto; }
+  #shapesCv { width: 100%; }
+  .chip { display: inline-block; padding: 1px 7px; border-radius: 10px; border: 1px solid var(--line); font-size: 11px; cursor: pointer; }
+  .chip:hover { border-color: #94a3b8; }
 </style>
 </head>
 <body>
@@ -120,6 +128,7 @@
       <label class="inline">ISI &lt; <input id="isiThr" type="number" value="1.5" step="0.1" min="0.1" style="width:56px"> ms</label>
       <button id="nbBtn" class="on" title="Show nearby units' spikes on the trace">nearby units</button>
       <button id="busyBtn" title="Jump to the 10-s window with most spikes (B)">busiest</button>
+      <button id="shapesBtn" title="Individual spikes per epoch, with other units' spikes on the same channels in grey (E)">spike shapes</button>
       <button id="pageL" title="Page left (A)">⟨⟨</button><button id="pageR" title="Page right (D)">⟩⟩</button>
       <span id="timeLbl" class="muted"></span>
     </section>
@@ -158,6 +167,8 @@
     <tr><td><kbd>X</kbd></td><td>centre on the next spike also assigned to a nearby unit (dark ring)</td></tr>
     <tr><td><kbd>U</kbd></td><td>centre on the next spike the other sorter's matched unit did <i>not</i> find</td></tr>
     <tr><td><kbd>B</kbd></td><td>busiest 10-s window for this unit</td></tr>
+    <tr><td><kbd>E</kbd></td><td>spike shapes: a sample of this unit's spikes per epoch (black = their mean), footprint-mismatched spikes,
+      and other units' spikes on the same channels in grey; the last column overlays the epoch means. <kbd>Esc</kbd> closes</td></tr>
     <tr><td>click a channel label</td><td>plot that channel's per-spike amplitudes (dots, overview, histogram); default is the largest channel in µV</td></tr>
     <tr><td><kbd>+</kbd> / <kbd>-</kbd> / <kbd>0</kbd></td><td>trace gain up / down / reset</td></tr>
     <tr><td><kbd>1</kbd>–<kbd>6</kbd></td><td>verdict (see buttons); press again to clear</td></tr>
@@ -168,6 +179,21 @@
   Purple diamonds: footprint mismatch, i.e. the spike's amplitude pattern across the unit's top channels differs from the template's by more than 50% after scaling, and by more than 6 noise SDs.
   Dark rings: the same event is also assigned to a nearby unit (largest channels within 100 µm) within 0.1 ms, counted only for unit pairs that coincide at 0.1 ms at least 4x more often than at 0.5-2.5 ms. Green strip: best-matching unit from the other sorter (pale = not shared).
   Coloured dots/rows: nearby units of the same sorter. Traces are the preprocessed (CatGT 300–9000 Hz + local CAR) voltage both sorters read.</p>
+</div>
+<div id="shapes" hidden>
+  <div class="bar">
+    <b>Spike shapes</b>
+    <label class="inline">spikes per epoch
+      <select id="shN"><option>20</option><option selected>50</option><option>100</option><option>200</option></select></label>
+    <label class="inline">per other unit
+      <select id="shO"><option value="0">none</option><option>10</option><option selected>20</option><option>50</option></select></label>
+    <label class="inline"><input type="checkbox" id="shMean" checked> mean</label>
+    <label class="inline">height <button id="shYdn" title="Smaller">−</button><button id="shYup" title="Bigger">+</button></label>
+    <span id="shInfo" class="muted"></span>
+    <button id="shClose" style="margin-left:auto" title="Close (Esc or E)">close</button>
+  </div>
+  <div id="shChips" class="bar" style="font-size:11px"></div>
+  <div id="shapesWrap"><canvas id="shapesCv"></canvas></div>
 </div>
 <div id="err"></div>
 <script>
@@ -308,7 +334,7 @@ async function selectPos(i) {
   if (inWin < 5) busiest(false);
   history.replaceState(null, "", `#sorter=${S.sorter}&unit=${id}`);
   renderHead(); renderCriteria(); renderReview(); renderMetrics(); renderEpochs(); drawTemplate(); drawIsi();
-  loadWindow();
+  loadWindow(); loadShapes();
 }
 async function loadAmplitudes(u) {
   const ch = S.ampCh, r = await fetch(`/api/amplitudes?sorter=${u.sorter}&unit=${u.id}&ch=${ch}`);
@@ -320,7 +346,7 @@ async function selectAmpChannel(ch) {
   if (!S.unit || ch === S.ampCh) return;
   S.ampCh = ch;
   try { await loadAmplitudes(S.unit); } catch (e) { showErr("Could not load amplitudes: " + e.message); return; }
-  renderHead(); drawTemplate(); drawTraces(); drawOverview();
+  renderHead(); drawTemplate(); drawTraces(); drawOverview(); loadShapes();
 }
 const chanInfo = c => S.unit.channels.find(x => x.index === c) || (S.unit.main_channel.index === c ? S.unit.main_channel : null);
 function computeFlags() {
@@ -803,7 +829,7 @@ function nextSpike(dir, pred) {
   showErr("No more spikes in that direction.");
 }
 $("#winSel").addEventListener("change", e => { if (e.target.value) setWindowSeconds(e.target.value); });
-$("#nchSel").addEventListener("change", e => { S.nch = +e.target.value; drawTemplate(); loadWindow(); });
+$("#nchSel").addEventListener("change", e => { S.nch = +e.target.value; drawTemplate(); loadWindow(); loadShapes(); });
 $("#gainUp").onclick = () => { S.gain *= 1.25; drawTraces(); };
 $("#gainDn").onclick = () => { S.gain /= 1.25; drawTraces(); };
 $("#isiThr").addEventListener("change", e => { S.isiThr = Math.max(0.1, +e.target.value || 1.5); computeFlags(); renderHead(); drawIsi(); drawTraces(); });
@@ -853,6 +879,129 @@ tcv.addEventListener("dblclick", e => {
   const r = tcv.getBoundingClientRect(), f = Math.min(1, Math.max(0, (e.clientX - r.left - S.geom.L) / S.geom.PW));
   const c = S.t0 + f * S.win; S.win = Math.round(0.1 * S.meta.fs); S.t0 = c - S.win / 2; syncWinSel(); loadWindow();
 });
+// ------------------------------------------------------------------ spike shapes (E)
+// A reproducible sample of the unit's spikes per epoch (drawn in the epoch's colour, black = their mean), its
+// footprint-mismatched spikes (purple), and spikes of other units whose footprint covers the same channels
+// (grey, sampled over the whole recording). Same channels, samples and µV scale in every column.
+const SH = { open: false, data: null, key: "", hi: new Set(), y: 1 };
+const OTHER_COLORS = ["#0891b2", "#ea580c", "#16a34a", "#9333ea", "#be123c", "#0d9488", "#a16207", "#2563eb", "#c026d3", "#4d7c0f", "#b45309", "#334155"];
+function toggleShapes(open) {
+  SH.open = open ?? !SH.open;
+  $("#shapes").hidden = !SH.open; $("#shapesBtn").classList.toggle("on", SH.open);
+  if (SH.open) loadShapes();
+}
+async function loadShapes() {
+  const u = S.unit; if (!u || !SH.open) return;
+  const ch = shownChannels().map(c => c.index), n = +$("#shN").value, o = +$("#shO").value;
+  const key = `${u.sorter}|${u.id}|${ch.join(",")}|${n}|${o}`;
+  if (key === SH.key && SH.data) { drawShapes(); return; }
+  SH.key = key; SH.data = null; $("#shInfo").innerHTML = '<span class="spin">loading spikes…</span>';
+  let d;
+  try { d = await api(`/api/shapes?sorter=${u.sorter}&unit=${u.id}&ch=${ch.join(",")}&n=${n}&other=${o}`); }
+  catch (e) { showErr("Could not load spike shapes: " + e.message); $("#shInfo").textContent = ""; return; }
+  if (key !== SH.key) return;
+  const bin = atob(d.data), bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  d.arr = new Float32Array(bytes.buffer);
+  let off = 0; d.groups.forEach(g => { g.off = off; off += g.count; });
+  d.others = d.groups.filter(g => g.kind === "other");
+  d.others.forEach((g, k) => g.color = OTHER_COLORS[k % OTHER_COLORS.length]);
+  SH.data = d; SH.hi = new Set();
+  $("#shInfo").textContent = `#${u.id} · dotted line = spike time · black = mean of the spikes shown`;
+  renderShapeChips(); drawShapes();
+}
+function renderShapeChips() {
+  const d = SH.data;
+  if (!d.others.length) {
+    $("#shChips").innerHTML = `<span class="muted">${+$("#shO").value ? "no other unit is this large on these channels" : "other units off"}</span>`;
+    return;
+  }
+  $("#shChips").innerHTML = '<span class="muted">other units on these channels, in grey (click to colour one):</span> ' + d.others.map(g => {
+    const on = SH.hi.has(g.name);
+    return `<span class="chip" data-id="${g.name}" style="${on ? `background:${g.color};color:#fff;border-color:${g.color}` : `color:${g.color}`}"
+      title="${g.count} of ${g.n_total} spikes shown · ${g.ptp_here.toFixed(0)} µV peak-to-peak on these channels">#${g.name} ${g.label}</span>`;
+  }).join(" ");
+  $("#shChips").querySelectorAll(".chip").forEach(el => el.onclick = () => {
+    const id = el.dataset.id; SH.hi.has(id) ? SH.hi.delete(id) : SH.hi.add(id); renderShapeChips(); drawShapes();
+  });
+}
+function drawShapes() {
+  const d = SH.data, u = S.unit; if (!d || !u || !SH.open) return;
+  const C = d.channels.length, ns = d.ns, A = d.arr;
+  const rows = shownChannels().filter(c => d.channels.includes(c.index));
+  const ep = d.groups.filter(g => g.kind === "epoch"), fl = d.groups.find(g => g.kind === "flagged");
+  const cols = [...ep, ...(fl ? [fl] : []), { kind: "means", name: "epoch means" }];
+  const wrap = $("#shapesWrap"), L = 64, top = 34;
+  const laneH = Math.max(70, Math.min(170, (wrap.clientHeight - top - 24) / Math.max(1, rows.length)));
+  const [ctx, W, H] = setupCanvas($("#shapesCv"), top + rows.length * laneH + 24);
+  ctx.clearRect(0, 0, W, H);
+  const colW = (W - L - 4) / cols.length, xw = colW - 8;
+  let amax = 1; rows.forEach(c => u.template[c.k].forEach(v => amax = Math.max(amax, Math.abs(v))));
+  const sc = laneH * 0.42 / amax * SH.y;
+  const snip = (k, ci) => A.subarray((k * C + ci) * ns, (k * C + ci + 1) * ns);
+  const mean = (g, ci) => {
+    const m = new Float32Array(ns);
+    for (let k = g.off; k < g.off + g.count; k++) { const s = snip(k, ci); for (let t = 0; t < ns; t++) m[t] += s[t]; }
+    return m.map(v => v / g.count);
+  };
+  const line = (w, x0, yc) => {
+    ctx.beginPath();
+    for (let t = 0; t < ns; t++) { const x = x0 + t / (ns - 1) * xw, y = yc - w[t] * sc; t ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
+    ctx.stroke();
+  };
+  const alphaFor = n => Math.max(0.06, Math.min(0.45, 6 / Math.max(1, n)));
+  cols.forEach((g, j) => {
+    const x0 = L + j * colW;
+    ctx.fillStyle = g.kind === "epoch" ? epochColor(g.name) : g.kind === "flagged" ? "#7c3aed" : "#0f172a";
+    ctx.font = "bold 11px system-ui"; ctx.fillText(g.name, x0, 13, xw);
+    ctx.font = "10px system-ui"; ctx.fillStyle = "#64748b";
+    const sub = g.kind === "means" ? "overlaid; red dashed = template" : !g.count ? "no spikes" :
+      `${g.count} of ${g.n_total} spikes` + (g.kind === "epoch" ? ` · ${(g.start_s + S.meta.time_offset_s).toFixed(0)}–${(g.end_s + S.meta.time_offset_s).toFixed(0)} s` : "");
+    ctx.fillText(sub, x0, 26, xw);
+  });
+  const others = d.others, xd = d.nbefore / (ns - 1) * xw;
+  rows.forEach((c, r) => {
+    const ci = d.channels.indexOf(c.index), y0 = top + r * laneH, yc = y0 + laneH / 2;
+    laneLabel(ctx, c, 2, yc);
+    cols.forEach((g, j) => {
+      const x0 = L + j * colW;
+      ctx.save(); ctx.beginPath(); ctx.rect(x0, y0, xw, laneH); ctx.clip();
+      ctx.lineWidth = 1; ctx.strokeStyle = "#e2e8f0"; ctx.beginPath(); ctx.moveTo(x0, yc); ctx.lineTo(x0 + xw, yc); ctx.stroke();
+      ctx.strokeStyle = "#cbd5e1"; ctx.setLineDash([2, 3]); ctx.beginPath(); ctx.moveTo(x0 + xd, y0); ctx.lineTo(x0 + xd, y0 + laneH); ctx.stroke(); ctx.setLineDash([]);
+      if (g.kind !== "means") {
+        // other units' spikes behind this unit's: grey, or the unit's colour when picked
+        others.forEach(o => {
+          const hi = SH.hi.has(o.name);
+          ctx.strokeStyle = hi ? o.color : "#64748b"; ctx.globalAlpha = hi ? Math.min(0.6, 2 * alphaFor(o.count)) : 0.07;
+          for (let k = o.off; k < o.off + o.count; k++) line(snip(k, ci), x0, yc);
+        });
+        ctx.strokeStyle = g.kind === "flagged" ? "#7c3aed" : epochColor(g.name); ctx.globalAlpha = alphaFor(g.count);
+        for (let k = g.off; k < g.off + g.count; k++) line(snip(k, ci), x0, yc);
+        ctx.globalAlpha = 1;
+        if ($("#shMean").checked && g.count) { ctx.strokeStyle = "#0f172a"; ctx.lineWidth = 1.6; line(mean(g, ci), x0, yc); }
+      } else {
+        others.filter(o => SH.hi.has(o.name)).forEach(o => {
+          ctx.strokeStyle = o.color; ctx.lineWidth = 1.3; ctx.setLineDash([4, 3]); line(o.template[ci], x0, yc); ctx.setLineDash([]);
+        });
+        ep.forEach(e => { if (!e.count) return; ctx.strokeStyle = epochColor(e.name); ctx.lineWidth = 1.6; line(mean(e, ci), x0, yc); });
+        ctx.strokeStyle = "#dc2626"; ctx.lineWidth = 1.2; ctx.setLineDash([3, 2]); line(u.template[c.k], x0, yc); ctx.setLineDash([]);
+      }
+      ctx.restore();
+    });
+  });
+  ctx.fillStyle = "#64748b"; ctx.font = "11px system-ui";
+  ctx.fillText(`each cell −${(d.nbefore / S.meta.fs * 1000).toFixed(1)} to +${((ns - d.nbefore) / S.meta.fs * 1000).toFixed(1)} ms · ` +
+    `centre to lane edge = ${(laneH / 2 / sc).toFixed(0)} µV (same in every cell) · coloured chips' templates are dashed in the last column`,
+    L, top + rows.length * laneH + 16);
+}
+$("#shapesBtn").onclick = () => toggleShapes();
+$("#shClose").onclick = () => toggleShapes(false);
+$("#shN").addEventListener("change", loadShapes);
+$("#shO").addEventListener("change", loadShapes);
+$("#shMean").addEventListener("change", drawShapes);
+$("#shYup").onclick = () => { SH.y *= 1.25; drawShapes(); };
+$("#shYdn").onclick = () => { SH.y /= 1.25; drawShapes(); };
+
 window.addEventListener("keydown", e => {
   if (e.target.matches("input, textarea, select")) return;
   const k = e.key;
@@ -873,13 +1022,14 @@ window.addEventListener("keydown", e => {
   else if (k === "x" || k === "X") { if (S.dup.some(v => v)) nextSpike(e.shiftKey ? -1 : 1, i => S.dup[i]); else showErr("No duplicated spikes in this unit."); }
   else if (k === "b" || k === "B") busiest();
   else if (k >= "1" && k <= "6") setVerdict(VERDICTS[+k - 1][0]);
+  else if (k === "e" || k === "E") toggleShapes();
   else if (k === "?") $("#help").hidden = !$("#help").hidden;
-  else if (k === "Escape") $("#help").hidden = true;
+  else if (k === "Escape") { $("#help").hidden = true; toggleShapes(false); }
   else return;
   e.preventDefault();
 });
 let resizeTimer = null;
-window.addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { if (S.unit) { drawTemplate(); drawIsi(); loadWindow(); } }, 150); });
+window.addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { if (S.unit) { drawTemplate(); drawIsi(); loadWindow(); drawShapes(); } }, 150); });
 
 // per-spike flags are computed by the server in the background on first use; refresh when ready
 function pollFlags() {

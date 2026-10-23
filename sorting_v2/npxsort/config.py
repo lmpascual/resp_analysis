@@ -35,6 +35,9 @@ CHOICES = {
 
 EXTRACT_REQUIRED = ("name", "channel", "polarity", "threshold_sd", "seed_window_s")
 EXTRACT_OPTIONAL = ("sorters", "search_window_s", "min_footprint_cosine", "neighbour_um")
+REMOVE_REQUIRED = ("sorter", "unit_id", "start_s", "end_s", "reason")
+REMOVE_OPTIONAL = ("only_flagged", "expect_removed")
+REMOVE_FLAGS = ("footprint_mismatch", "duplicate")
 
 
 class ConfigError(ValueError):
@@ -122,6 +125,35 @@ def _validate(cfg: dict) -> None:
         if rule["name"] in names:
             raise ConfigError(f"{where}: duplicate name '{rule['name']}'.")
         names.add(rule["name"])
+
+    def whole(v) -> bool:
+        return isinstance(v, int) and not isinstance(v, bool)
+
+    for i, rule in enumerate(cfg["curation"]["remove_spikes"]):
+        where = f"curation.remove_spikes[{i}]"
+        if not isinstance(rule, dict):
+            raise ConfigError(f"{where} must be a mapping.")
+        missing = [k for k in REMOVE_REQUIRED if k not in rule]
+        if missing:
+            raise ConfigError(f"{where} is missing {missing}.")
+        unknown = set(rule) - set(REMOVE_REQUIRED) - set(REMOVE_OPTIONAL)
+        if unknown:
+            raise ConfigError(f"{where} has unknown keys {sorted(unknown)}.")
+        if rule["sorter"] not in cfg["sorters"]:
+            raise ConfigError(f"{where}.sorter: unknown sorter '{rule['sorter']}'.")
+        if not whole(rule["unit_id"]):
+            raise ConfigError(f"{where}.unit_id must be a whole number (the unit_id in units.tsv, not Phy's cluster_id).")
+        t0, t1 = rule["start_s"], rule["end_s"]
+        if not all(isinstance(t, (int, float)) and not isinstance(t, bool) for t in (t0, t1)) or not 0 <= t0 < t1:
+            raise ConfigError(f"{where}: need 0 <= start_s < end_s (seconds).")
+        if not isinstance(rule["reason"], str) or not rule["reason"].strip():
+            raise ConfigError(f"{where}.reason must say why the spikes are removed.")
+        flags = rule.get("only_flagged")
+        if flags is not None and (not isinstance(flags, list) or not flags or set(flags) - set(REMOVE_FLAGS)):
+            raise ConfigError(f"{where}.only_flagged must be null or a non-empty list of {list(REMOVE_FLAGS)}.")
+        n = rule.get("expect_removed")
+        if n is not None and (not whole(n) or n < 0):
+            raise ConfigError(f"{where}.expect_removed must be a whole number >= 0.")
 
     win = cfg["input"]
     if win["start_s"] is not None and win["start_s"] < 0:

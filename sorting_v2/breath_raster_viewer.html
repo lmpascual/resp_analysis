@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Breath state raster</title>
+<style>
+  :root { --bg: #fcfcfb; --ink: #0b0b0b; --ink2: #52514e; --grid: #d9d8d4; --hl: #f1f0ec; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 13px system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--ink); }
+  header { padding: 10px 16px 8px; border-bottom: 1px solid var(--grid); display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; }
+  header h1 { font-size: 15px; font-weight: 600; margin: 0 8px 0 0; }
+  .ctl { display: inline-flex; align-items: center; gap: 6px; color: var(--ink2); }
+  select, input, button { font: inherit; color: var(--ink); }
+  button { background: #fff; border: 1px solid var(--grid); border-radius: 4px; padding: 2px 8px; cursor: pointer; }
+  button:hover { background: var(--hl); }
+  #jumps { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+  #legend { padding: 6px 16px; display: flex; flex-wrap: wrap; gap: 4px 16px; border-bottom: 1px solid var(--grid); }
+  #legend .note { color: var(--ink2); }
+  .chip { display: inline-flex; align-items: center; gap: 6px; }
+  .sw { width: 12px; height: 12px; border-radius: 2px; flex: none; }
+  #wrap { position: relative; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; }
+  #cv { position: sticky; top: 0; display: block; }
+  #tip { position: fixed; pointer-events: none; background: #fff; border: 1px solid var(--grid); padding: 6px 8px; border-radius: 4px;
+         font-size: 12px; line-height: 1.45; box-shadow: 0 2px 8px rgba(0,0,0,.12); display: none; max-width: 420px; }
+  #tip b { font-weight: 600; }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="title">Breath-by-breath HMM states</h1>
+  <span class="ctl">View
+    <select id="mode">
+      <option value="one">one K, onset + offset</option>
+      <option value="all">all K, one alignment</option>
+    </select></span>
+  <span class="ctl" id="kctl">K <select id="k"></select></span>
+  <span class="ctl" id="actl">aligned to
+    <select id="align"><option value="on">inspiration onset</option><option value="off" selected>inspiration offset</option></select></span>
+  <span class="ctl">row height <input id="rowh" type="range" min="1" max="20" value="6"> <span id="rowhv">6 px</span></span>
+  <label class="ctl"><input id="dots" type="checkbox" checked> breath edges</label>
+  <span class="ctl">jump to <span id="jumps"></span></span>
+</header>
+<div id="legend"></div>
+<div id="wrap"><canvas id="cv"></canvas><div id="spacer"></div></div>
+<div id="tip"></div>
+<script type="application/json" id="data">__DATA__</script>
+<script>
+"use strict";
+const D = JSON.parse(document.getElementById("data").textContent);
+const INK = "#0b0b0b", INK2 = "#52514e", GRID = "#d9d8d4", OUT = [230, 230, 227];
+const TOP = 40, LEFT = 92, RIGHT = 190, GAP = 16;
+const N = D.n, NB = D.nbins;
+const ALIGN = { on: ["inspiration onset", "I-on"], off: ["inspiration offset", "I-off"] };
+const $ = (id) => document.getElementById(id);
+const wrap = $("wrap"), cv = $("cv"), ctx = cv.getContext("2d"), tip = $("tip");
+
+function decode(b64) { const s = atob(b64); const a = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) a[i] = s.charCodeAt(i); return a; }
+function rgb(hex) { const v = parseInt(hex.slice(1), 16); return [(v >> 16) & 255, (v >> 8) & 255, v & 255]; }
+
+// one offscreen image per (K, alignment): one pixel per 5 ms bin and breath
+const rows = {}, imgs = {};
+for (const k of D.ks) for (const al of ["on", "off"]) {
+  const a = decode(D.rows[k][al]); rows[k + al] = a;
+  const c = document.createElement("canvas"); c.width = NB; c.height = N;
+  const g = c.getContext("2d"), im = g.createImageData(NB, N), pal = D.colours[k].map(rgb);
+  for (let i = 0; i < a.length; i++) { const col = a[i] === 255 ? OUT : pal[a[i]]; im.data.set(col, 4 * i); im.data[4 * i + 3] = 255; }
+  g.putImageData(im, 0, 0); imgs[k + al] = c;
+}
+// condition blocks (consecutive breaths with the same condition)
+const blocks = [];
+for (let i = 0; i < N; i++) { if (!blocks.length || D.cond[i] !== blocks[blocks.length - 1].name) blocks.push({ name: D.cond[i], s0: i, s1: i + 1 }); else blocks[blocks.length - 1].s1 = i + 1; }
+
+const S = { mode: "one", k: D.ref_k, align: "off", rowH: 6, dots: true };
+for (const k of D.ks) $("k").insertAdjacentHTML("beforeend", `<option value="${k}">${k}</option>`);
+$("k").value = S.k;
+for (const b of blocks) if (b.name !== "transition" && !$("jumps").querySelector(`[data-n="${b.name}"]`))
+  $("jumps").insertAdjacentHTML("beforeend", `<button data-n="${b.name}" data-r="${b.s0}">${b.name}</button>`);
+
+function panels() {
+  return S.mode === "one" ? [[S.k, "on"], [S.k, "off"]] : D.ks.map((k) => [k, S.align]);
+}
+function legend() {
+  const k = S.mode === "one" ? S.k : D.ref_k;
+  let h = D.order[k].map((s) => `<span class="chip"><span class="sw" style="background:${D.colours[k][s]}"></span>${D.labels[k][s]}</span>`).join("");
+  if (S.mode === "all") h += `<span class="note">legend: K = ${k} (reference); colours matched to it across K, grey = no K = ${k} counterpart</span>`;
+  else if (S.k !== D.ref_k) h += `<span class="note">colours matched to the K = ${D.ref_k} reference; grey = no counterpart</span>`;
+  h += `<span class="note">light grey = window outside the recording</span>`;
+  $("legend").innerHTML = h;
+  $("kctl").style.display = S.mode === "one" ? "" : "none";
+  $("actl").style.display = S.mode === "all" ? "" : "none";
+  $("title").textContent = `Breath-by-breath HMM states (${N} breaths, ${D.units})`;
+}
+function layout() {
+  const h = window.innerHeight - wrap.getBoundingClientRect().top;
+  wrap.style.height = h + "px";
+  $("spacer").style.height = Math.max(0, N * S.rowH + TOP - h + 8) + "px";   // before measuring the width
+  const dpr = window.devicePixelRatio || 1, w = wrap.clientWidth;
+  cv.width = w * dpr; cv.height = h * dpr; cv.style.width = w + "px"; cv.style.height = h + "px";
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  draw();
+}
+function geom() {
+  const w = wrap.clientWidth, P = panels(), pw = (w - LEFT - RIGHT - GAP * (P.length - 1)) / P.length;
+  return { w, h: wrap.clientHeight, P, pw, x0: (i) => LEFT + i * (pw + GAP) };
+}
+function edges(i, al) {   // other edge of this breath and next onset, ms from the alignment event
+  const t = al === "on" ? D.on_s[i] : D.off_s[i];
+  return [((al === "on" ? D.off_s[i] : D.on_s[i]) - t) * 1e3, i + 1 < N ? (D.on_s[i + 1] - t) * 1e3 : NaN];
+}
+function draw() {
+  const G = geom(), rh = S.rowH, first = wrap.scrollTop / rh, r0 = Math.floor(first), dy = (first - r0) * rh;
+  const r1 = Math.min(N, r0 + Math.ceil((G.h - TOP) / rh) + 2), span = D.pre_ms + D.post_ms;
+  ctx.fillStyle = "#fcfcfb"; ctx.fillRect(0, 0, G.w, G.h);
+  ctx.font = "12px system-ui, sans-serif"; ctx.textBaseline = "middle";
+  G.P.forEach(([k, al], i) => {
+    const x0 = G.x0(i), xz = x0 + G.pw * D.pre_ms / span;
+    ctx.save(); ctx.beginPath(); ctx.rect(x0, TOP, G.pw, G.h - TOP); ctx.clip();
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(imgs[k + al], 0, r0, NB, r1 - r0, x0, TOP - dy, G.pw, (r1 - r0) * rh);
+    if (S.dots && rh >= 2) {
+      ctx.fillStyle = "rgba(11,11,11,0.75)";
+      const sz = Math.max(1.5, Math.min(3, rh * 0.5));
+      for (let r = r0; r < r1; r++) for (const e of edges(r, al)) {
+        if (!(e > -D.pre_ms && e < D.post_ms)) continue;
+        ctx.fillRect(x0 + G.pw * (e + D.pre_ms) / span - sz / 2, TOP - dy + (r - r0 + 0.5) * rh - sz / 2, sz, sz);
+      }
+    }
+    ctx.strokeStyle = INK; ctx.lineWidth = 1.4; ctx.setLineDash([5, 4]);
+    ctx.beginPath(); ctx.moveTo(xz, TOP); ctx.lineTo(xz, G.h); ctx.stroke(); ctx.setLineDash([]);
+    ctx.restore();
+    // axis
+    ctx.fillStyle = INK; ctx.textAlign = "center";
+    ctx.fillText(S.mode === "one" ? `K = ${k}, aligned to ${ALIGN[al][0]}` : `K = ${k}`, x0 + G.pw / 2, 10);
+    ctx.fillStyle = INK2; ctx.strokeStyle = INK2; ctx.lineWidth = 1;
+    const step = G.pw < 300 ? 200 : 100, ticks = [];
+    for (let t = -D.pre_ms; t <= D.post_ms; t += step) {
+      const x = x0 + G.pw * (t + D.pre_ms) / span, txt = t === 0 ? ALIGN[al][1] : String(t), tw = ctx.measureText(txt).width;
+      const left = t === -D.pre_ms ? x : t === D.post_ms ? x - tw : x - tw / 2;
+      ticks.push({ t, x, txt, left, right: left + tw });
+      ctx.beginPath(); ctx.moveTo(x, TOP - 5); ctx.lineTo(x, TOP); ctx.stroke();
+    }
+    ticks.sort((a, b) => (a.t === 0 ? -1 : b.t === 0 ? 1 : 0));   // the alignment label first, then skip overlaps
+    const used = [];
+    ctx.textAlign = "left";
+    for (const tk of ticks) {
+      if (used.some(([l, r]) => tk.left < r + 6 && tk.right > l - 6)) continue;
+      used.push([tk.left, tk.right]);
+      ctx.fillText(tk.txt, tk.left, TOP - 14);
+    }
+  });
+  // left gutter: breath number and raw time
+  ctx.textAlign = "right"; ctx.fillStyle = INK2; ctx.strokeStyle = INK2;
+  const steps = [1, 2, 5, 10, 20, 50, 100, 200, 500], st = steps.find((s) => s * rh >= 34) || 500;
+  ctx.fillText("breath  time (s)", LEFT - 6, TOP - 14);
+  for (let r = Math.ceil(r0 / st) * st; r < r1; r += st) {
+    const y = TOP - dy + (r - r0 + 0.5) * rh;
+    if (y < TOP + 4) continue;
+    ctx.fillText(`${r + 1}  ${D.on_s[r].toFixed(1)}`, LEFT - 8, y);
+    ctx.beginPath(); ctx.moveTo(LEFT - 4, y); ctx.lineTo(LEFT, y); ctx.stroke();
+  }
+  // right gutter: condition blocks, labels stay in view while their block is on screen
+  const xr = G.x0(G.P.length - 1) + G.pw + 8;
+  ctx.textAlign = "left";
+  for (const b of blocks) {
+    const y0 = TOP + (b.s0 - first) * rh, y1 = TOP + (b.s1 - first) * rh;
+    if (y1 < TOP || y0 > G.h) continue;
+    const a = Math.max(y0, TOP), z = Math.min(y1, G.h);
+    ctx.strokeStyle = b.name === "transition" ? GRID : INK2; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(xr, a + 1); ctx.lineTo(xr + 5, a + 1); ctx.lineTo(xr + 5, z - 1); ctx.lineTo(xr, z - 1); ctx.stroke();
+    if (z - a < 14) continue;
+    const ly = Math.min(a + 10, z - (z - a >= 30 ? 22 : 10));
+    ctx.fillStyle = b.name === "transition" ? INK2 : INK;
+    ctx.fillText(b.name, xr + 10, ly);
+    if (z - a >= 30) {
+      ctx.fillStyle = INK2;
+      ctx.fillText(`${D.on_s[b.s0].toFixed(0)}–${D.on_s[b.s1 - 1].toFixed(0)} s (${b.s1 - b.s0})`, xr + 10, ly + 14);
+    }
+  }
+}
+function hover(ev) {
+  const G = geom(), rect = cv.getBoundingClientRect(), x = ev.clientX - rect.left, y = ev.clientY - rect.top;
+  const i = G.P.findIndex((_, j) => x >= G.x0(j) && x < G.x0(j) + G.pw);
+  const r = Math.floor(wrap.scrollTop / S.rowH + (y - TOP) / S.rowH);
+  if (i < 0 || y < TOP || r < 0 || r >= N) { tip.style.display = "none"; return; }
+  const [k, al] = G.P[i], b = Math.min(NB - 1, Math.floor((x - G.x0(i)) / G.pw * NB));
+  const s = rows[k + al][r * NB + b], t = -D.pre_ms + (b + 0.5) * D.bin_ms;
+  const ti = (D.off_s[r] - D.on_s[r]) * 1e3, ibi = r + 1 < N ? (D.on_s[r + 1] - D.on_s[r]) * 1e3 : NaN;
+  tip.innerHTML = `<b>breath ${r + 1}</b> · onset ${D.on_s[r].toFixed(2)} s · ${D.cond[r]}${D.gasp[r] ? " (gasp)" : ""}<br>` +
+    `Ti ${ti.toFixed(0)} ms · IBI ${isNaN(ibi) ? "–" : ibi.toFixed(0) + " ms"}<br>` +
+    `K = ${k} · ${t > 0 ? "+" : ""}${t.toFixed(1)} ms from ${ALIGN[al][0]}<br>` +
+    (s === 255 ? "outside the recording" : `<span class="sw" style="display:inline-block;vertical-align:-1px;background:${D.colours[k][s]}"></span> ${D.labels[k][s]}`);
+  tip.style.display = "block";
+  const tx = ev.clientX + 14 + tip.offsetWidth > window.innerWidth ? ev.clientX - tip.offsetWidth - 14 : ev.clientX + 14;
+  tip.style.left = tx + "px"; tip.style.top = Math.min(ev.clientY + 14, window.innerHeight - tip.offsetHeight - 8) + "px";
+}
+function setRowH(v) {
+  const keep = wrap.scrollTop / S.rowH;
+  S.rowH = v; $("rowhv").textContent = v + " px"; layout(); wrap.scrollTop = keep * v; draw();
+}
+$("mode").onchange = (e) => { S.mode = e.target.value; legend(); layout(); };
+$("k").onchange = (e) => { S.k = +e.target.value; legend(); draw(); };
+$("align").onchange = (e) => { S.align = e.target.value; draw(); };
+$("rowh").oninput = (e) => setRowH(+e.target.value);
+$("dots").onchange = (e) => { S.dots = e.target.checked; draw(); };
+$("jumps").onclick = (e) => { const r = e.target.dataset.r; if (r !== undefined) wrap.scrollTop = +r * S.rowH; };
+wrap.addEventListener("scroll", () => requestAnimationFrame(draw), { passive: true });
+cv.addEventListener("mousemove", hover); cv.addEventListener("mouseleave", () => (tip.style.display = "none"));
+window.addEventListener("resize", layout);
+legend(); layout();
+</script>
+</body>
+</html>

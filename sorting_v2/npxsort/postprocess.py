@@ -18,6 +18,7 @@ import spikeinterface.core as si
 import spikeinterface.curation as scur
 
 from .extract import extract_units
+from .remove import remove_spikes
 
 log = logging.getLogger(__name__)
 
@@ -150,8 +151,9 @@ def unit_table(analyzer, labels: pd.DataFrame) -> pd.DataFrame:
     table["x_um"] = locs[:, 0]
     table["depth_um"] = locs[:, 1]
     table = table.join(metrics)
-    if "extracted_as" in analyzer.sorting.get_property_keys():
-        table["extracted_as"] = analyzer.sorting.get_property("extracted_as")
+    for prop in ("extracted_as", "removed_spikes"):
+        if prop in analyzer.sorting.get_property_keys():
+            table[prop] = analyzer.sorting.get_property(prop)
     return table
 
 
@@ -163,6 +165,14 @@ def postprocess_sorter(name: str, sorting: si.BaseSorting, rec: si.BaseRecording
     sorting, clean_report = clean_sorting(sorting, rec, cfg, name)
     if extract_report:
         clean_report["extracted_units"] = extract_report
+    sorting, remove_report, removed = remove_spikes(sorting, rec, cfg, name, job_kwargs)
+    removed_file = out_dir / "removed_spikes.tsv"
+    if remove_report:
+        clean_report["removed_spikes"] = remove_report
+        clean_report["spikes_after_spike_removal"] = int(sorting.count_total_num_spikes())
+        removed.to_csv(removed_file, sep="\t", index=False)
+    else:
+        removed_file.unlink(missing_ok=True)  # left from an earlier run with rules
     analyzer = build_analyzer(sorting, rec, cfg, out_dir / "analyzer", job_kwargs)
     labels = label_units(analyzer, cfg, out_dir)
     table = unit_table(analyzer, labels)

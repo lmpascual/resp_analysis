@@ -53,6 +53,12 @@ DUPLICATE_EXCESS = 4.0           #     by this factor ...
 DUPLICATE_MIN_COUNT = 5          #     with at least this many coincidences
 FLAGS_VERSION = 2
 
+# Spike-shape panel: individual spikes per epoch, with other units' spikes on the same channels behind them
+SHAPES_MAX_PER_EPOCH = 200
+SHAPES_MAX_OTHER_UNITS = 12      # other units drawn in grey: those whose footprint covers the displayed channels ...
+SHAPES_OTHER_MIN_FRACTION = 0.3  # ... i.e. their template there is >= this fraction of their own largest channel
+SHAPES_MAX_FLAGGED = 100
+
 
 # ----------------------------------------------------------------------------- bombcell reasons
 
@@ -626,6 +632,66 @@ class ReviewData:
             self._amp_cache[key] = (out, pol)
         return out, pol
 
+    def _snippets(self, times: np.ndarray, chans: np.ndarray, nbefore: int, ns: int) -> np.ndarray:
+        """Voltage (µV) around each spike time on the given channels: (spikes, channels, samples)."""
+        times = times[(times - nbefore >= 0) & (times - nbefore + ns <= self.n_samples)]
+        if times.size == 0:
+            return np.zeros((0, len(chans), ns), dtype=np.float32)
+        idx = times[:, None] - nbefore + np.arange(ns)[None, :]
+        seg = np.asarray(self.traces[idx[:, :, None], chans[None, None, :]], dtype=np.float32)   # (spikes, samples, channels)
+        seg = seg * self.gain[chans] + self.offset[chans]
+        return np.ascontiguousarray(seg.transpose(0, 2, 1))
+
+    def spike_shapes(self, sorter: str, unit: int, chans: list[int], n_epoch: int, n_other: int) -> dict:
+        """Individual spikes of a unit per epoch, its footprint-mismatched spikes, and spikes of other units
+        whose footprint covers the same channels, all on the same channels and samples as the template.
+        Spikes are a reproducible random sample (seeded by unit id). Returns JSON with base64 float32 data."""
+        import base64
+
+        s = self.sorters[sorter]
+        i = s.index_of[unit]
+        ch = np.asarray(chans, dtype=int)
+        ns, nb = int(s.dense_templates.shape[1]), int(s.nbefore)
+        n_epoch = int(max(1, min(n_epoch, SHAPES_MAX_PER_EPOCH)))
+        n_other = int(max(0, min(n_other, SHAPES_MAX_PER_EPOCH)))
+        rng = np.random.default_rng(int(unit))
+        sp = s.spikes[unit]
+        groups, blocks, times_out = [], [], []
+
+        def add(kind, name, t_all, n, **extra):
+            t = np.sort(rng.choice(t_all, size=n, replace=False)) if t_all.size > n else t_all
+            t = t.astype(np.int64)
+            t = t[(t - nb >= 0) & (t - nb + ns <= self.n_samples)]
+            seg = self._snippets(t, ch, nb, ns)
+            groups.append({"kind": kind, "name": str(name), "n_total": int(t_all.size), "count": int(seg.shape[0]), **extra})
+            blocks.append(seg)
+            times_out.extend(t.tolist())
+
+        epochs = self.epochs or [{"name": "whole recording", "start_s": 0.0, "end_s": self.n_samples / self.fs}]
+        for e in epochs:
+            a, b = np.searchsorted(sp, [int(e["start_s"] * self.fs), int(e["end_s"] * self.fs)])
+            add("epoch", e["name"], sp[a:b], n_epoch, start_s=float(e["start_s"]), end_s=float(e["end_s"]))
+
+        if s.flags is not None:
+            pos = s.order[s.bounds[i]:s.bounds[i + 1]]
+            mis = s.flags["mismatch"][pos]
+            if mis.any():
+                add("flagged", "footprint mismatch", sp[mis], SHAPES_MAX_FLAGGED)
+
+        if n_other:
+            # other units visible on these channels: template amplitude here >= a fraction of their own maximum
+            here = s.ptp[:, ch].max(axis=1)
+            frac = here / np.maximum(s.ptp.max(axis=1), 1e-6)
+            cand = [j for j in np.argsort(-here) if j != i and frac[j] >= SHAPES_OTHER_MIN_FRACTION]
+            for j in cand[:SHAPES_MAX_OTHER_UNITS]:
+                v = s.unit_ids[j]
+                add("other", v, s.spikes[v], n_other, label=str(s.table.at[v, "label"]), ptp_here=float(here[j]),
+                    template=s.dense_templates[j][:, ch].T.round(2).tolist())
+
+        data = np.concatenate(blocks, axis=0) if blocks else np.zeros((0, len(ch), ns), dtype=np.float32)
+        return {"channels": ch.tolist(), "ns": ns, "nbefore": nb, "groups": groups, "times": times_out,
+                "data": base64.b64encode(data.astype("<f4").tobytes()).decode("ascii")}
+
     def window_spikes(self, sorter: str, ids: list[int], start: int, end: int) -> dict:
         s = self.sorters[sorter]
         out = {}
@@ -726,6 +792,10 @@ def make_handler(data: ReviewData):
                 elif url.path == "/api/window":
                     ids = [int(x) for x in q.get("ids", "").split(",") if x]
                     self._json(data.window_spikes(q["sorter"], ids, int(q["start"]), int(q["end"])))
+                elif url.path == "/api/shapes":
+                    chans = [int(x) for x in q["ch"].split(",")]
+                    self._json(data.spike_shapes(q["sorter"], int(q["unit"]), chans,
+                                                 int(q.get("n", 50)), int(q.get("other", 20))))
                 elif url.path == "/api/amplitudes":
                     amps, pol = data.channel_amplitudes(q["sorter"], int(q["unit"]), int(q["ch"]))
                     self._send(amps.astype("<f4").tobytes(), "application/octet-stream",

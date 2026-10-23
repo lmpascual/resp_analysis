@@ -101,6 +101,8 @@ def spike_pass(traces, gain, offset, noise, n_samples: int, fs: float, setups: d
     step = int(fs)
     for c0 in range(0, n_samples, step):
         c1 = min(n_samples, c0 + step)
+        if not any(np.searchsorted(s, c0) < np.searchsorted(s, c1) for s, _ in spike_vectors.values()):
+            continue  # no spikes in this chunk: don't read it
         a0, a1 = max(0, c0 - margin), min(n_samples, c1 + margin)
         block = np.asarray(traces[a0:a1])
         last = block.shape[0] - 1
