@@ -1,0 +1,110 @@
+{
+    "animal_id": "e097",
+    "session_id": "e097_g2_prelaser_60s",
+    "raw_data_dir": "Z:\\ramirezlab\\budde\\npx\\animal_files\\e097_g2\\e097_g2_imec0",
+    "output_dir": "outputs\\e097\\output_e097_prelaser_60s",
+    "interactive_checkpoint": false,
+    "duration_s": 60.0,
+    "start_time_s": 796.827,
+    "emg": {
+        "channel_index": 0,
+        "fs": 9999.955307,
+        "highpass_cutoff": 300.0,
+        "lowpass_cutoff": 3000.0,
+        "notch_freq": 60.0,
+        "rectify": true,
+        "smoothing_window_ms": 50.0,
+        "peak_threshold_sd": 2.0,
+        "min_breath_duration_ms": 80.0,
+        "min_inter_breath_interval_ms": 120.0,
+        "apnea_threshold_s": 2.0
+    },
+    "integrated_emg": {
+        "channel_index": 1,
+        "fs": 9999.955307
+    },
+    "flow": {
+        "channel_index": 5,
+        "fs": 9999.955307
+    },
+    "ecg": {
+        "enabled": true,
+        "channel_index": 2,
+        "fs": 9999.955307,
+        "highpass_cutoff": 10.0,
+        "lowpass_cutoff": 100.0,
+        "notch_freq": 60.0,
+        "r_peak_threshold_sd": 2.0,
+        "min_rr_interval_ms": 80.0
+    },
+    "sync_opto": {
+        "sync_channel_index": 8,
+        "opto_channel_index": 6,
+        "fs": 9999.955307,
+        "pulse_threshold_v": 0.5,
+        "min_pulse_width_ms": 1.0
+    },
+    "ephys": {
+        "fs_ap": 30000.0,
+        "bin_size_ms": 20.0,
+        "depth_bin_um": 100.0,
+        "min_firing_rate_hz": 0.1
+    },
+    "catgt": {
+        "enabled": true,
+        "catgt_path": "C:\\Users\\lpascu\\SpikeGLX\\CatGT-win\\CatGT.exe",
+        "run_name": "e097",
+        "gate": 2,
+        "trigger": 0,
+        "probe": 0,
+        "t_shift": true,
+        "apfilter": "butter,12,300,9000",
+        "loccar_um": [
+            75.0,
+            300.0
+        ],
+        "start_secs": 796.827,
+        "max_secs": 60.0,
+        "dest_dir": "C:\\SCRATCH_neuropixels\\catgt_output"
+    },
+    "motion": {
+        "enabled": false,
+        "preset": "kilosort_like",
+        "scratch_dir": "C:\\SCRATCH_neuropixels"
+    },
+    "sliding_window": {
+        "enabled": true,
+        "channel_range": [
+            0,
+            384
+        ],
+        "window_size": 50,
+        "overlap": 20,
+        "agreement_threshold": 0.5,
+        "min_spikes_to_evaluate": 30
+    },
+    "sorters": {
+        "enabled_sorters": [
+            "kilosort4"
+        ],
+        "do_CAR": false,
+        "save_phy": true,
+        "export_alf": true,
+        "isi_threshold_s": 0.0015,
+        "qc_isi_cutoff": 0.1,
+        "qc_presence_ratio": 0.9,
+        "qc_amp_cutoff": 0.1,
+        "qc_min_fr_hz": 0.1,
+        "n_jobs": 12
+    },
+    "kilosort4": {
+        "enabled": true,
+        "Th_universal": 9.0,
+        "Th_learned": 8.0,
+        "do_CAR": false,
+        "nblocks": 1,
+        "batch_size": 60000,
+        "nt": 61,
+        "duplicate_spike_ms": 0.25
+    }
+}

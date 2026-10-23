@@ -1,0 +1,93 @@
+# Default settings for every run. An experiment config only needs to list what it changes.
+# Unknown keys in an experiment config are an error (typos must not be silently ignored).
+
+experiment_name: unnamed
+
+paths:
+  output_dir: null     # results you keep: sortings, analyzers, unit tables, Phy, figures
+  scratch_dir: null    # big temporary files: preprocessed binary (~10 GB per 7 min), sorter working folders
+
+input:
+  source: catgt        # catgt | spikeglx_raw | si_folder
+  folder: null         # folder holding the .ap.bin/.ap.meta (catgt, spikeglx_raw) or a saved SpikeInterface recording (si_folder)
+  stream_id: imec0.ap
+  start_s: null        # optional sub-window, seconds from the start of the file
+  duration_s: null
+
+preprocessing:
+  # These four only apply to input.source == spikeglx_raw.
+  # CatGT output is already phase-shifted, filtered and referenced; si_folder input is assumed preprocessed.
+  phase_shift: true
+  highpass_hz: 300.0
+  common_reference: global          # global | local | none
+  local_radius_um: [75.0, 300.0]    # (exclude, include) radii when common_reference == local
+  # These apply to every source.
+  bad_channels:
+    detect: true
+    action: remove                  # remove | interpolate | keep   (channels outside the brain are always removed when action != keep)
+    # Raw SpikeGLX input uses the IBL coherence method (dead / noise / outside brain).
+    # Already-referenced input (CatGT, si_folder) can't use it, so channels are judged by noise level
+    # relative to the probe median instead:
+    flat_ratio: 0.2                 # below this -> dead (flat)
+    noisy_ratio: 5.0                # above this -> noise
+  save_dtype: int16                 # dtype of the preprocessed binary both sorters read
+
+motion:
+  enabled: true        # estimate drift once with SpikeInterface and give both sorters the corrected data
+  preset: dredge       # dredge | dredge_fast | nonrigid_accurate | rigid_fast | ...
+  detect_kwargs: {}
+  estimate_motion_kwargs: {}
+  interpolate_motion_kwargs: {}
+
+sorters:
+  kilosort4:
+    enabled: true
+    params: {}         # any Kilosort4 parameter; pipeline sets do_CAR / do_correction to match the preprocessing
+  lupin:
+    enabled: true
+    params: {}         # any Lupin parameter; pipeline sets preprocessing / motion handling to match
+
+job_kwargs:
+  n_jobs: 0.8                  # fraction of CPU cores, or an integer
+  chunk_duration: 1s
+  progress_bar: true
+  pool_engine: process         # process | thread  (thread avoids Windows process pipes if those ever fail)
+  mp_context: spawn
+  max_threads_per_worker: 1
+
+postprocessing:
+  censor_duplicate_ms: 0.3       # drop a unit's second spike within this window (Kilosort double-detections)
+  remove_redundant_units: true   # drop one of two units that share >= redundant_agreement of spikes
+  redundant_agreement: 0.8
+  max_spikes_per_unit: 500       # spikes sampled per unit for waveforms / PCA
+  ms_before: 1.0
+  ms_after: 2.0
+  sparsity_radius_um: 100.0
+  pca_metrics: true              # isolation distance, L-ratio, d-prime (slower; needed for bombcell isolation thresholds)
+  seed: 0
+
+curation:
+  method: bombcell                # labels: noise | mua | good | non_soma
+  threshold_overrides: {}         # {section: {metric: {greater: x, less: y}}} merged over the bombcell defaults
+  merge_suggestions: true         # write likely over-split pairs to a table for review (never applied automatically)
+  extract_units: []               # hand-defined units pulled out of the sorters' output; see npxsort/extract.py
+  remove_spikes: []               # hand-picked spikes removed from a unit (time window, optionally only flagged spikes); see npxsort/remove.py
+
+# Named periods (file time, s) compared by the epoch-stability stage: for every unit, does its spatial
+# footprint and waveform stay the same from one epoch to another? Writes <sorter>/epoch_stability.tsv,
+# epoch_activity.tsv and epoch_templates.npz. [] skips the stage.
+#   epochs:
+#     - {name: baseline, start_s: 0, end_s: 60}
+#     - {name: gasping, start_s: 85, end_s: 130}
+epochs: []
+
+comparison:
+  enabled: true
+  delta_time_ms: 0.4
+  match_score: 0.5               # a unit counts as found by both sorters at or above this agreement
+  exclude_labels: [noise]
+
+export:
+  phy: true
+  alf: true
+  report: true                    # per-unit summary figures (slow on hundreds of units)

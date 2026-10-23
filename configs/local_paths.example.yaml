@@ -1,0 +1,16 @@
+# Where the data live on this computer. Copy this file to local_paths.yaml in this folder (that copy isn't in git)
+# and change the four folders. Every config writes its paths as ${raw_data}/..., ${catgt}/..., ${scratch}/...,
+# ${outputs}/..., and every script builds its default paths from these. Use forward slashes.
+
+# SpikeGLX run folders as recorded. For e097: <raw_data>/e097_g2/ holds e097_g2_t0.nidq.bin/.meta and e097_g2_imec0/.
+raw_data: D:/npx/animal_files
+
+# CatGT output folders (the sorting input). CatGT's -dest for e097 is <catgt>/catgt_e097_intact_420s etc.; see README.
+catgt: D:/npx/catgt
+
+# Sorting scratch space: preprocessed binaries and sorter folders, ~10 GB per sorted window. Phy and the review
+# browser read the preprocessed binary from here, so keep it while you curate.
+scratch: D:/npx/scratch
+
+# Everything the pipeline and the analyses write (for e097: <outputs>/e097/intact_window_v2, population_dynamics_v2, ...).
+outputs: D:/npx/outputs

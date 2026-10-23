@@ -1,0 +1,18 @@
+# Optional: makes npxsort importable from anywhere (notebooks, other code) with `pip install -e sorting --no-deps`
+# from the repository root. The scripts in sorting/ and analysis/ don't need it: they find npxsort by its path.
+# Dependencies are installed from environment/npxsort.yml + npxsort-requirements.txt (torch must come first).
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "npxsort"
+version = "0.2.0"
+description = "Neuropixels spike sorting with Kilosort 4 + Lupin, quality metrics, bombcell labels and a trace-review browser"
+requires-python = ">=3.11"
+
+[tool.setuptools]
+packages = ["npxsort"]
+
+[tool.setuptools.package-data]
+npxsort = ["defaults.yaml", "review_app.html"]

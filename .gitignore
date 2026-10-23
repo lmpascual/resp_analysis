@@ -1,52 +1,19 @@
-# Python & Virtual Environments
+# Python and virtual environments
 __pycache__/
 *.py[cod]
-*$py.class
-*.so
-.Python
-env/
-venv/
-.venv/
-ENV/
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
 *.egg-info/
-.installed.cfg
-*.egg
 .pytest_cache/
+.venv/
+venv/
+build/
+dist/
+node_modules/
 
-# Tier 1: Exploratory Sandbox (Private / Untracked)
-scratch/
-exploratory/
-temp/
-output_cache/
+# This computer's folders (copy configs/local_paths.example.yaml to configs/local_paths.yaml)
+configs/local_paths.yaml
 
-# Output Directories (Experiment & Subject Outputs - Local Storage Only)
+# Data and results stay out of git: raw recordings, CatGT extracts, sorter output, figures (see README, "Data")
 outputs/
-output*/
-e097/
-e097_prelaser_respiratory_neurodynamics/
-LP21_fent_EXPT_g1_60s_120s_lupin_run/
-inspiration-off-attractor/
-external/
-
-# Large Presentations, Videos & Slides
-*.pptx
-*.mp4
-presentations/
-sfn_media_extracted/
-
-# Neurophysiology & DAQ Raw / Binary Data Files
 *.bin
 *.cbin
 *.meta
@@ -58,13 +25,20 @@ sfn_media_extracted/
 *.h5
 *.hdf5
 *.pkl
-
-# Logs & Temporary Execution Artifacts
 *.log
-CatGT.log
 
-# IDE & OS Configuration
+# Presentations and media
+*.pptx
+*.mp4
+presentations/
+
+# Local-only scratch files moved aside in the 2026-10 cleanup (see archive/README.md)
+archive/local_untracked/
+scratch/
+
+# Editors and OS
 .vscode/
 .idea/
+.gemini/
 .DS_Store
 Thumbs.db

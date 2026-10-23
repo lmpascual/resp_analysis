@@ -1,0 +1,31 @@
+# Check for configs/e097_optotag.yaml: train 8 only, matched in the laser window as recorded (no motion correction).
+# Train 8 came after train 7's step, when the tissue was within ~5 um of its sorted-window position, so its results
+# should agree with the motion-corrected run. The pulses, drift and validate stages are the same as the main run's.
+
+paths:
+  sorted_output_dir: ${outputs}/e097/intact_window_v2
+  sorted_catgt: ${catgt}/catgt_e097_intact_420s/catgt_e097_g2
+  laser_catgt: ${catgt}/catgt_e097_laser_600s/catgt_e097_g2
+  nidq_bin: ${raw_data}/e097_g2/e097_g2_t0.nidq.bin
+  session_json: ${outputs}/e097/e097_whole_session_data.json
+  output_dir: ${outputs}/e097/optotag_laser_window_train8_uncorrected
+  scratch_dir: ${scratch}/e097_optotag
+
+sorter: kilosort4
+
+nidq:
+  laser_channel: 6
+  laser_threshold_v: 0.5
+  sync_column: 8
+  sync_bit: 7
+
+matching:
+  correct_motion: false
+
+response:
+  trains: [8]
+
+job_kwargs:
+  n_jobs: 8
+  chunk_duration: 1s
+  progress_bar: true

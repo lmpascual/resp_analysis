@@ -1,0 +1,31 @@
+# Analysis environment: breathing, single-unit phase / PETHs, population HMM and PCA, transition and slide figures
+# (analysis/population, analysis/slides). It runs Nick Bush's cibrrig code (Bush & Ramirez 2024 Nat Neurosci; Bush,
+# Oliveira, Glovak & Ramirez 2025) for breaths and phase, so the breath detection is the published code itself.
+#
+#   conda env create -f environment/cibrrig.yml      (from the repository root)
+#   conda activate cibrrig
+#
+# Versions are the ones the 2026-10 e097 analyses ran with. cibrrig is pinned to the commit that was installed then
+# (github.com/nbush257/cibrrig, 2025-02-19); it brings ibllib and SpikeInterface with it.
+# The analyses don't use Phy; to curate in Phy, add it to this env (pip install phy==2.1.0rc1) or use its own env.
+name: cibrrig
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - pip
+  - git
+  - pip:
+      - numpy==1.26.4
+      - scipy==1.17.1
+      - pandas==3.0.2
+      - matplotlib==3.10.8
+      - scikit-learn==1.8.0
+      - hmmlearn==0.3.3
+      - joblib==1.4.2
+      - pyyaml==6.0.3
+      - pillow==12.2.0
+      - python-pptx>=1.0         # analysis/slides/amend_vrc_deck.py only
+      - spikeinterface==0.102.3
+      - ibllib==3.4.1
+      - cibrrig @ git+https://github.com/nbush257/cibrrig@ac9a381355286373d736b49018a5e03451452583
