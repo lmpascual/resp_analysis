@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HMM states in PC1–PC3</title>
+<style>
+  :root { --bg: #fcfcfb; --ink: #0b0b0b; --ink2: #52514e; --grid: #d9d8d4; --hl: #f1f0ec; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin: 0; font: 13px system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--ink);
+         display: flex; flex-direction: column; }
+  header { padding: 10px 16px 8px; border-bottom: 1px solid var(--grid); display: flex; flex-wrap: wrap; gap: 8px 18px;
+           align-items: center; }
+  header h1 { font-size: 15px; font-weight: 600; margin: 0 8px 0 0; }
+  .ctl { display: inline-flex; align-items: center; gap: 6px; color: var(--ink2); }
+  select, input, button { font: inherit; color: var(--ink); }
+  button { background: #fff; border: 1px solid var(--grid); border-radius: 4px; padding: 2px 8px; cursor: pointer; }
+  button:hover { background: var(--hl); }
+  button.on { background: var(--ink); color: #fff; border-color: var(--ink); }
+  .seg { display: inline-flex; }
+  .seg button { border-radius: 0; margin-left: -1px; }
+  .seg button:first-child { border-radius: 4px 0 0 4px; margin-left: 0; }
+  .seg button:last-child { border-radius: 0 4px 4px 0; }
+  #main { flex: 1; display: flex; min-height: 0; }
+  #side { width: 300px; flex: none; overflow-y: auto; border-right: 1px solid var(--grid); padding: 10px 14px 16px; }
+  #plot { flex: 1; min-width: 0; min-height: 420px; overflow: hidden; }
+  h2 { font-size: 13px; font-weight: 600; margin: 14px 0 6px; display: flex; align-items: center; gap: 6px; }
+  h2:first-child { margin-top: 2px; }
+  h2 .acts { margin-left: auto; display: inline-flex; gap: 4px; font-weight: normal; }
+  h2 .acts button { padding: 0 6px; font-size: 12px; }
+  .sw { width: 12px; height: 12px; border-radius: 2px; flex: none; display: inline-block; }
+  .ep { display: flex; align-items: center; gap: 6px; padding: 2px 0; cursor: pointer; }
+  .ep .meta { margin-left: auto; color: var(--ink2); font-size: 11.5px; white-space: nowrap; }
+  #only { display: flex; flex-wrap: wrap; gap: 4px; }
+  #only button { font-size: 12px; padding: 1px 6px; }
+  .st { display: flex; align-items: center; gap: 6px; padding: 1px 0; }
+  .st .sw { border-radius: 50%; }
+  .note { color: var(--ink2); font-size: 12px; line-height: 1.45; margin-top: 12px; }
+  @media (max-width: 760px) {
+    #main { flex-direction: column; }
+    #side { width: auto; border-right: none; border-bottom: 1px solid var(--grid); max-height: 45vh; }
+    #plot { min-height: 70vh; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="title">HMM states in PC1–PC3</h1>
+  <span class="ctl">colour by <span class="seg" id="colour">
+    <button data-v="state" class="on">HMM state</button><button data-v="epoch">epoch</button><button data-v="trial">trial</button></span></span>
+  <span class="ctl"><label><input type="checkbox" id="bins" checked> 5 ms bins</label>
+    <label><input type="checkbox" id="means" checked> state means</label>
+    <label><input type="checkbox" id="cycles"> mean cycle</label>
+    <label><input type="checkbox" id="ioff" checked> I-off point</label></span>
+  <span class="ctl">dot size <input id="size" type="range" min="1" max="6" step="0.5" value="2"></span>
+  <span class="ctl">opacity <input id="opacity" type="range" min="0.05" max="1" step="0.05" value="0.5"></span>
+  <span class="ctl">view <span class="seg" id="views">
+    <button data-v="3d">3D</button><button data-v="xy">PC1–PC2</button><button data-v="xz">PC1–PC3</button><button data-v="yz">PC2–PC3</button></span></span>
+  <label class="ctl"><input type="checkbox" id="equal" checked> equal units on all axes</label>
+</header>
+<div id="main">
+  <aside id="side"></aside>
+  <div id="plot"></div>
+</div>
+<script>__PLOTLY__</script>
+<script type="application/json" id="data">__DATA__</script>
+<script>
+"use strict";
+const D = JSON.parse(document.getElementById("data").textContent);
+const INK = "#0b0b0b", INK2 = "#52514e", GRID = "#d9d8d4", NONE = "#b9b8b3";
+const AX = ["PC1", "PC2", "PC3"];
+const $ = (id) => document.getElementById(id);
+const S = { colour: "state", bins: true, means: true, cycles: false, ioff: true, size: 2, opacity: 0.5, equal: true, on: {} };
+const key = (ti, ei) => ti + "|" + ei;
+
+// per-epoch arrays built once (Plotly.react skips arrays it has already seen)
+D.trials.forEach((T, ti) => T.epochs.forEach((E, ei) => {
+  S.on[key(ti, ei)] = ti === 0 && ["baseline", "gasping", "early recovery"].includes(E.name);
+  E.sc = E.s.map((s) => D.state_colours[s]);
+  E.ht = E.s.map((s, i) => `${T.name} · ${E.name}<br>${E.t[i].toFixed(3)} s · ${D.state_names[s]}`);
+  const c = E.cycle, n = c.x.length, cl = (a) => [...a, a[0]].map((v) => (v === null ? null : v));
+  E.cyc = { x: cl(c.x), y: cl(c.y), z: cl(c.z), sc: [...c.s, c.s[0]].map((s) => (s < 0 ? NONE : D.state_colours[s])),
+            ht: [...c.s, c.s[0]].map((s, i) => `${T.name} · ${E.name} mean cycle<br>phase ${(-180 + 360 * ((i % n) + 0.5) / n).toFixed(0)}°` +
+                                              (s >= 0 ? ` · mostly ${D.state_names[s]}` : "")) };
+}));
+
+// ------------------------------------------------------------------ side panel
+const side = $("side");
+let html = "";
+D.trials.forEach((T, ti) => {
+  html += `<h2><span class="sw" style="background:${T.colour}"></span>${T.name}<span class="acts">` +
+          `<button data-all="${ti}">all</button><button data-none="${ti}">none</button></span></h2>`;
+  T.epochs.forEach((E, ei) => {
+    html += `<label class="ep" title="${E.t0}–${E.t1} s · ${E.n_breaths} breaths · ${E.n_bins} bins (${Math.min(E.n_bins, D.n_max)} drawn)">` +
+            `<input type="checkbox" data-k="${key(ti, ei)}"><span class="sw" style="background:${E.colour}"></span>` +
+            `${ei + 1}. ${E.name}<span class="meta">${E.t0.toFixed(0)}–${E.t1.toFixed(0)} s · ${E.n_breaths} br</span></label>`;
+  });
+});
+const names = [...new Set(D.trials.flatMap((T) => T.epochs.map((E) => E.name)))];
+html += `<h2>only this epoch, every trial</h2><div id="only">` + names.map((n) => `<button data-only="${n}">${n}</button>`).join("") + `</div>`;
+html += `<h2>K = ${D.k} HMM states</h2>` + D.state_order.map((s) =>
+  `<div class="st"><span class="sw" style="background:${D.state_colours[s]}"></span>${D.state_names[s]}</div>`).join("");
+html += `<div class="note">Small dots: 5 ms bins (up to ${D.n_max} per epoch, random), coloured by Viterbi state. Big dots: each ` +
+        `state's mean position in that epoch, outlined in the epoch or trial colour when colouring by those. Mean cycle: PCs ` +
+        `averaged in 50 phase bins, each vertex coloured by the most common state there; ◆ = inspiration onset. ✕ = the ` +
+        `trial's baseline inspiration-off point. Every trial sits on the same PCA axes (fit on ${D.pca_fit}). ` +
+        `Hover a point for its raw time.</div>`;
+side.innerHTML = html;
+function syncBoxes() { side.querySelectorAll("input[data-k]").forEach((b) => (b.checked = S.on[b.dataset.k])); }
+syncBoxes();
+side.addEventListener("change", (e) => { const k = e.target.dataset.k; if (k) { S.on[k] = e.target.checked; draw(); } });
+side.addEventListener("click", (e) => {
+  const d = e.target.dataset;
+  if (d.all !== undefined || d.none !== undefined) {
+    const ti = +(d.all ?? d.none);
+    D.trials[ti].epochs.forEach((_, ei) => (S.on[key(ti, ei)] = d.all !== undefined));
+  } else if (d.only !== undefined) {
+    D.trials.forEach((T, ti) => T.epochs.forEach((E, ei) => (S.on[key(ti, ei)] = E.name === d.only)));
+  } else return;
+  syncBoxes(); draw();
+});
+
+// ------------------------------------------------------------------ plot
+function traces() {
+  const tr = [];
+  D.trials.forEach((T, ti) => {
+    let any = false;
+    T.epochs.forEach((E, ei) => {
+      if (!S.on[key(ti, ei)]) return;
+      any = true;
+      const solid = S.colour === "epoch" ? E.colour : S.colour === "trial" ? T.colour : null;
+      if (S.bins) tr.push({ type: "scatter3d", mode: "markers", x: E.x, y: E.y, z: E.z, hovertext: E.ht, hoverinfo: "text",
+        marker: { size: S.size, color: solid || E.sc, opacity: S.opacity } });
+      if (S.cycles) {
+        const c = E.cyc, i0 = E.cycle.onset;
+        tr.push({ type: "scatter3d", mode: "lines", x: c.x, y: c.y, z: c.z, hovertext: c.ht, hoverinfo: "text",
+          line: { width: 7, color: solid || c.sc } });
+        tr.push({ type: "scatter3d", mode: "markers", x: [c.x[i0]], y: [c.y[i0]], z: [c.z[i0]], hoverinfo: "text",
+          hovertext: [`${T.name} · ${E.name}<br>inspiration onset (mean cycle)`],
+          marker: { size: 6, symbol: "diamond", color: solid || INK, line: { color: INK, width: 1 } } });
+      }
+      if (S.means && E.means.length) tr.push({ type: "scatter3d", mode: "markers",
+        x: E.means.map((m) => m[1]), y: E.means.map((m) => m[2]), z: E.means.map((m) => m[3]), hoverinfo: "text",
+        hovertext: E.means.map((m) => `${T.name} · ${E.name}<br>${D.state_names[m[0]]} mean (${m[4]} bins)`),
+        marker: { size: 8, color: E.means.map((m) => D.state_colours[m[0]]), opacity: 1,
+                  line: { color: solid || INK, width: solid ? 4 : 1.5 } } });
+    });
+    if (S.ioff && any) tr.push({ type: "scatter3d", mode: "markers", x: [T.ioff[0]], y: [T.ioff[1]], z: [T.ioff[2]],
+      hoverinfo: "text", hovertext: [`${T.name}: baseline inspiration-off point`],
+      marker: { size: 6, symbol: "x", color: S.colour === "trial" ? T.colour : INK } });
+  });
+  return tr;
+}
+// orthographic zoom is set by the aspect ratio, not the eye distance, and plotly fits the scene box to the plot height:
+// plane views scale the ratios so the plane fills the plot (ORTHO_PX: box px per unit of ratio per px of plot height)
+const ORTHO_PX = 0.5;
+let zoom = 1;
+function ratios() {
+  const r = D.limits.map((l) => l[1] - l[0]), m = Math.max(...r) / 1.6;
+  return r.map((v) => (S.equal ? v / m : 1));
+}
+function aspect() {
+  const [x, y, z] = ratios().map((v) => v * zoom);
+  return { "scene.aspectmode": "manual", "scene.aspectratio": { x, y, z } };
+}
+function planeZoom(c) {
+  const w = gd.clientWidth, h = gd.clientHeight, r = ratios();
+  return Math.min(0.9 * w / (ORTHO_PX * h * r[c.h]), 0.9 / (ORTHO_PX * r[c.v]));
+}
+function eye3d() {          // back the perspective camera off in a plot narrower than it is tall
+  const e = CAM["3d"].eye, s = Math.max(1, 1.15 * gd.clientHeight / gd.clientWidth);
+  return { x: e.x * s, y: e.y * s, z: e.z * s };
+}
+const axis = (d) => ({ title: { text: AX[d] }, range: D.limits[d], autorange: false, color: INK2, gridcolor: GRID,
+                       zerolinecolor: "#b5b4ae", backgroundcolor: "#fff", showbackground: true });
+// plane views look straight down the third PC, orthographic, to match the 2D figures
+const O = { x: 0, y: 0, z: 0 }, ZUP = { x: 0, y: 0, z: 1 };
+const CAM = {
+  "3d": { eye: { x: 1.45, y: -1.8, z: 0.85 }, up: ZUP, center: O, proj: "perspective" },
+  xy: { eye: { x: 0, y: 0, z: 1.3 }, up: { x: 0, y: 1, z: 0 }, center: O, proj: "orthographic", h: 0, v: 1 },
+  xz: { eye: { x: 0, y: -1.3, z: 0 }, up: ZUP, center: O, proj: "orthographic", h: 0, v: 2 },
+  yz: { eye: { x: 1.3, y: 0, z: 0 }, up: ZUP, center: O, proj: "orthographic", h: 1, v: 2 },
+};
+const t = D.trials.map((T) => T.name).join(" and ");      // before the plot: the header's height sets the plot's
+$("title").textContent = `K = ${D.k} HMM states in PC1–PC3 · ${t}`;
+document.title = `HMM states in PC1–PC3 · ${t}`;
+const gd = $("plot");
+const layout = {
+  margin: { l: 0, r: 0, t: 0, b: 0 }, paper_bgcolor: "#fcfcfb", showlegend: false, uirevision: "keep",
+  hoverlabel: { bgcolor: "#fff", bordercolor: GRID, font: { color: INK, size: 12 } },
+  scene: { xaxis: axis(0), yaxis: axis(1), zaxis: axis(2), uirevision: "keep",
+           aspectmode: "manual", aspectratio: aspect()["scene.aspectratio"],
+           camera: { eye: eye3d(), up: ZUP, center: O, projection: { type: "perspective" } } },
+};
+Plotly.newPlot(gd, traces(), layout, { responsive: true, displaylogo: false,
+  toImageButtonOptions: { filename: "hmm_states_pca_3d", scale: 2 } });
+function draw() { Plotly.react(gd, traces(), gd.layout); }
+
+$("colour").onclick = (e) => {
+  const v = e.target.dataset.v; if (!v) return;
+  S.colour = v; $("colour").querySelectorAll("button").forEach((b) => b.classList.toggle("on", b === e.target)); draw();
+};
+for (const id of ["bins", "means", "cycles", "ioff"]) $(id).onchange = (e) => { S[id] = e.target.checked; draw(); };
+for (const id of ["size", "opacity"]) $(id).oninput = (e) => { S[id] = +e.target.value; draw(); };
+// eye and projection go in separate relayouts: changing both in one call leaves the scene blank (plotly.js 3D)
+let proj = "perspective";
+$("views").onclick = async (e) => {
+  const c = CAM[e.target.dataset.v]; if (!c) return;
+  zoom = c.proj === "orthographic" ? planeZoom(c) : 1;
+  await Plotly.relayout(gd, { "scene.camera.eye": c.proj === "orthographic" ? c.eye : eye3d(), "scene.camera.up": c.up,
+                              "scene.camera.center": c.center, ...aspect() });
+  if (c.proj !== proj) { proj = c.proj; await Plotly.relayout(gd, { "scene.camera.projection.type": proj }); }
+};
+$("equal").onchange = (e) => { S.equal = e.target.checked; Plotly.relayout(gd, aspect()); };
+</script>
+</body>
+</html>
