@@ -1,0 +1,67 @@
+# m2020-19_g4 (Bush & Ramirez 2024 data, not in the paper's 39 gasp-analysis recordings): Vglut2/Ai32, Neuropixels 1.0
+# (imec0, bank 0, AP gain 500), urethane. The same mouse as m2020-19_g3, one gate later: room air, a single N2, and the
+# longest clean recovery of this mouse's gates. No hypercapnia in any gate of this mouse; earlier gates g0-g3 had N2
+# and/or hypoxia. Input is Nick Bush's CatGT output for the whole 1608 s gate.
+#
+# Gas and laser timing from the NIDQ digital lines (decoded 2026-10-26: bit 3 N2, bit 0 laser, bit 7 1 Hz sync), in
+# gate time: room air 0-1201.7 | N2 1201.7-1257.0 | room air from 1257.0 | laser (optotagging) 1419.3-1597.8.
+# all_epochs.csv puts the optotagging at 1434 s; the first laser pulse is at 1419.3 s. Gasping (Bush rule on Nick's
+# diaphragm onsets): 1233-1264 s (22 breaths). Breathing before N2: ~109/min.
+#
+# Window 1140-1415 s: 60 s of room-air baseline (~109 breaths), the N2, gasping and 151 s of recovery, ending 4 s
+# before the first laser pulse. e097's activity returned close to baseline 50-200 s after gasping ended.
+# Spike times are seconds from 1140 s; add 1140 for gate time.
+
+experiment_name: m2020-19_g4_anoxia_window_275s
+
+paths:
+  output_dir: ${outputs}/bush2024/m2020-19_g4/anoxia_window
+  scratch_dir: ${scratch}/bush2024_m2020-19_g4_anoxia_window   # ~6 GB preprocessed binary + sorter folder
+
+input:
+  source: catgt   # Nick's CatGT 1.7: -aphipass=300 -gfix=0.40,0.10,0.02, global demuxed CAR (gbldmx)
+  folder: ${dynaresp}/m2020-19/catgt_m2020-19_g4/m2020-19_g4_imec0
+  stream_id: imec0.ap
+  start_s: 1140.0
+  duration_s: 275.0
+
+motion:
+  # Off, as for e097 (D2) and m2021-31_g4: DREDGE misreads the activity changes of gasping as motion, and the
+  # stability stage of m2021-31_g4 found units moved < 1 um. The stability stage checks this window per epoch.
+  enabled: false
+
+sorters:
+  kilosort4:
+    enabled: true
+    params:
+      torch_device: cuda
+      do_correction: false
+  lupin:
+    # Off to halve the run time (m2021-31_g4: Lupin took 69 of 116 min). In e097 its cross-sorter agreement didn't
+    # separate the units reviewed single from unsure or multi (55 of 56 reviewed Kilosort 4 units were found by
+    # both), and the analyses use Kilosort 4 units only.
+    enabled: false
+
+job_kwargs:
+  n_jobs: 12
+
+# File time (gate time - 1140 s), from the valve lines and the Bush gasp rule.
+epochs:
+  - {name: baseline, start_s: 0, end_s: 61.7}           # room air
+  - {name: anoxia, start_s: 61.7, end_s: 93}            # N2 until the first gasp
+  - {name: gasping, start_s: 93, end_s: 124}
+  - {name: recovery_early, start_s: 124, end_s: 200}
+  - {name: recovery_late, start_s: 200, end_s: 275}
+
+nidq:
+  bin: ${dynaresp}/m2020-19/catgt_m2020-19_g4/m2020-19_g4_t0.nidq.bin
+  n_channels: 9          # XA0-XA7 + one digital word
+  emg_channel: 1         # XA1 raw diaphragm EMG
+  flow_channel: 0        # XA0 plethysmography
+  ecg_channel: null
+  file_start_s: 0.0      # the CatGT file starts at the start of the gate
+
+curation:
+  threshold_overrides:
+    mua:
+      presence_ratio: null   # as for e097 (D4): units may fall silent during gasping

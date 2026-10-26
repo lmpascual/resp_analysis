@@ -1,0 +1,73 @@
+# m2020-19_g3 (Bush & Ramirez 2024, Nat Neurosci): Vglut2/Ai32, Neuropixels 1.0 (imec0, bank 0, AP gain 500), urethane.
+# One of the paper's 39 gasping recordings (156 units in the gasp analysis), and the only one of them whose first
+# challenge comes from room air with no hypercapnia before it in the gate (no hypercapnia in any gate of this mouse).
+# Earlier gates g0-g2 each had N2 and/or hypoxia. Input is Nick Bush's CatGT output for the whole 1860 s gate.
+#
+# Gas and laser timing from the NIDQ digital lines (the gate list names no pins for this mouse; decoded 2026-10-26:
+# bit 3 N2, bit 4 hypoxia, bit 0 laser, bit 7 1 Hz sync), in gate time:
+#   room air 0-1202.9 | N2 1202.9-1248.7 | room air 1248.7-1306.5 | hypoxia (10% O2) 1306.5-1444.9
+#   N2 1444.9-1497.8 | room air from 1497.8 | laser (optotagging) 1544.9-1855.1
+# Nick's all_epochs.csv agrees within ~3 s. Gasping (Bush rule on Nick's diaphragm onsets): 1239-1256 s (10 breaths)
+# and 1464-1521 s (22 breaths). Breathing before the first N2: ~107/min.
+#
+# Window 1140-1540 s: 60 s of room-air baseline (~107 breaths; in e097, phase tuning and the baseline PCA space from
+# the last 60-90 baseline breaths matched those from the full baseline: split-half curve r 0.96-0.98, PCA overlap
+# >= 0.98), both anoxias and the hypoxia, ending 5 s before the first laser pulse. The protocol limits recovery: 54 s after the first gasping (then hypoxia), 19 s after the second
+# (then the laser). Spike times are seconds from 1140 s; add 1140 for gate time.
+
+experiment_name: m2020-19_g3_anoxia_window_400s
+
+paths:
+  output_dir: ${outputs}/bush2024/m2020-19_g3/anoxia_window
+  scratch_dir: ${scratch}/bush2024_m2020-19_g3_anoxia_window   # ~9 GB preprocessed binary + sorter folder
+
+input:
+  source: catgt   # Nick's CatGT 1.7: -aphipass=300 -gfix=0.40,0.10,0.02, global demuxed CAR (gbldmx)
+  folder: ${dynaresp}/m2020-19/catgt_m2020-19_g3/m2020-19_g3_imec0
+  stream_id: imec0.ap
+  start_s: 1140.0
+  duration_s: 400.0
+
+motion:
+  # Off, as for e097 (D2) and m2021-31_g4: DREDGE misreads the activity changes of gasping as motion, and the
+  # stability stage of m2021-31_g4 found units moved < 1 um. The stability stage checks this window per epoch.
+  enabled: false
+
+sorters:
+  kilosort4:
+    enabled: true
+    params:
+      torch_device: cuda
+      do_correction: false
+  lupin:
+    # Off to halve the run time (m2021-31_g4: Lupin took 69 of 116 min). In e097 its cross-sorter agreement didn't
+    # separate the units reviewed single from unsure or multi (55 of 56 reviewed Kilosort 4 units were found by
+    # both), and the analyses use Kilosort 4 units only.
+    enabled: false
+
+job_kwargs:
+  n_jobs: 12
+
+# File time (gate time - 1140 s), from the valve lines and the Bush gasp rule.
+epochs:
+  - {name: baseline, start_s: 0, end_s: 63}             # room air
+  - {name: anoxia_1, start_s: 63, end_s: 99}            # N2 until the first gasp
+  - {name: gasping_1, start_s: 99, end_s: 117}
+  - {name: recovery_1, start_s: 117, end_s: 166.5}      # room air until the hypoxia valve
+  - {name: hypoxia, start_s: 166.5, end_s: 305}
+  - {name: anoxia_2, start_s: 305, end_s: 324}          # N2 until the first gasp
+  - {name: gasping_2, start_s: 324, end_s: 381}
+  - {name: recovery_2, start_s: 381, end_s: 400}
+
+nidq:
+  bin: ${dynaresp}/m2020-19/catgt_m2020-19_g3/m2020-19_g3_t0.nidq.bin
+  n_channels: 9          # XA0-XA7 + one digital word
+  emg_channel: 1         # XA1 raw diaphragm EMG
+  flow_channel: 0        # XA0 plethysmography
+  ecg_channel: null
+  file_start_s: 0.0      # the CatGT file starts at the start of the gate
+
+curation:
+  threshold_overrides:
+    mua:
+      presence_ratio: null   # as for e097 (D4): units may fall silent during gasping
