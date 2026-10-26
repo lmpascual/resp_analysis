@@ -1,0 +1,11 @@
+{
+ "recording": "m2021-31_g4 hypoxia window (gate time; sort config sorting/configs/m2021-31_g4_hypoxia_window.yaml)",
+ "source": "gas valve switches on the NIDQ digital lines (XD bits 2-4, 1); laser (bit 0) last on at 2047.5 s",
+ "conditions": [
+  {"name": "baseline", "start_raw_s": 2050.0, "end_raw_s": 2107.5, "source": "room air, no laser", "colour": "#6a6a66"},
+  {"name": "hypercapnia", "start_raw_s": 2107.5, "end_raw_s": 2407.5, "source": "hypercapnia valve", "colour": "#8a6fd1"},
+  {"name": "hypoxia", "start_raw_s": 2407.5, "end_raw_s": 2527.5, "source": "10% O2 valve; breaths before gasping", "colour": "#f2918a"},
+  {"name": "gasping", "rule": "gasp_flag", "source": "Bush & Ramirez 2024: 7-breath median IBI > 1 s until < 0.85 s", "colour": "#d93636"},
+  {"name": "reoxygenation", "start_raw_s": 2527.5, "end_raw_s": 2648.0, "source": "100% O2 valve; non-gasp breaths to the end of the gate", "colour": "#1c9157"}
+ ]
+}

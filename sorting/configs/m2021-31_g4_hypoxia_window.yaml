@@ -1,0 +1,70 @@
+# m2021-31_g4 (Bush & Ramirez 2024, Nat Neurosci): Dbx1/Ai32 male, Neuropixels 1.0 (imec0), urethane, 2021-05-25.
+# One of the paper's 39 gasping recordings (gasp analysis: 143 units; its rSLDS model regenerates breathing).
+# Input is Nick Bush's CatGT output for the whole 2648.5 s gate; this config sorts 2050-2648 s around the hypoxia.
+#
+# Gas and laser timing from the NIDQ digital lines (XD bit 1 O2, 2 room air, 3 hypercapnia, 4 hypoxia, 0 laser), in
+# gate time (the CatGT AP file and the NIDQ file start together; sync edges agree to < 1 ms over the gate):
+#   100% O2 0-601 s | room air 601-2107.5 | laser (optotagging, long and phasic stimulation) 1201.0-2047.5
+#   hypercapnia 2107.5-2407.5 | hypoxia (10% O2) 2407.5-2527.5 | 100% O2 2527.5 to the end (2648.5)
+# Nick's epochs_t0.csv / all_epochs.csv give the nominal minutes (35, 40, 42 min), 7.5 s before the valve switches.
+# Gasping (Bush rule, cibrrig breath detection on XA1) runs 2467.4-2645.0 s: the gate ends before breathing recovers.
+#
+# Window: starts 2.5 s after the last laser pulse, so it has ~57 s of room-air baseline without stimulation, then
+# hypercapnia, hypoxia, gasping and 121 s of reoxygenation. 598 s, a little longer than the e097 windows (420 s).
+# Spike times are seconds from 2050 s; add 2050 for gate time.
+
+experiment_name: m2021-31_g4_hypoxia_window_598s
+
+paths:
+  output_dir: ${outputs}/bush2024/m2021-31_g4/hypoxia_window
+  scratch_dir: ${scratch}/bush2024_m2021-31_g4_hypoxia_window   # ~13.8 GB preprocessed binary + sorter folders
+
+input:
+  source: catgt   # Nick's CatGT: -aphipass=300 -gbldmx -gfix=0,0.1,0.02 (300 Hz high-pass, global demuxed CAR)
+  folder: ${dynaresp}/m2021-31/catgt_m2021-31_g4/m2021-31_g4_imec0
+  stream_id: imec0.ap
+  start_s: 2050.0
+  duration_s: 598.0
+
+motion:
+  # Off, as for e097 (D2). The DREDGE estimate on this window (2026-10-26; kept in
+  # <output>/motion_check_2026-10-26/) stays within ~±10 um until gasping starts (~420 s file time). During
+  # gasping the activity drops out and the estimate jumps to ±75-100 um, inconsistent across depths; applying it
+  # bent the spike bands. The sorters' own drift correction is switched off too.
+  enabled: false
+
+sorters:
+  kilosort4:
+    enabled: true
+    params:
+      torch_device: cuda
+      do_correction: false
+  lupin:
+    enabled: true
+    params:
+      apply_motion_correction: false
+      job_kwargs:
+        n_jobs: 4      # as for e097 (D3): 12 workers ran out of memory on Windows
+
+job_kwargs:
+  n_jobs: 12
+
+# File time (gate time - 2050 s). Gasping per the Bush rule: 2467.4-2645.0 s gate time (417.4-595.0 s file time).
+epochs:
+  - {name: baseline, start_s: 0, end_s: 57.5}           # room air, no laser
+  - {name: hypercapnia, start_s: 57.5, end_s: 357.5}
+  - {name: hypoxia, start_s: 357.5, end_s: 417}         # before the first gasp
+  - {name: gasping, start_s: 417, end_s: 598}
+
+nidq:
+  bin: ${dynaresp}/m2021-31/catgt_m2021-31_g4/m2021-31_g4_t0.nidq.bin
+  n_channels: 9          # XA0-XA7 + one digital word
+  emg_channel: 1         # XA1 raw diaphragm EMG
+  flow_channel: 0        # XA0 plethysmography
+  ecg_channel: null      # none recorded (XA2 is the hardware-integrated diaphragm, XA3 laser power)
+  file_start_s: 0.0      # the CatGT file starts at the start of the gate
+
+curation:
+  threshold_overrides:
+    mua:
+      presence_ratio: null   # as for e097 (D4): units may fall silent during gasping

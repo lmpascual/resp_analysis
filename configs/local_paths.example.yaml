@@ -14,3 +14,8 @@ scratch: D:/npx/scratch
 
 # Everything the pipeline and the analyses write (for e097: <outputs>/e097/intact_window_v2, population_dynamics_v2, ...).
 outputs: D:/npx/outputs
+
+# Optional extra roots, needed only by configs that use them:
+# Bush & Ramirez 2024 recordings: Nick Bush's processed folder (<dynaresp>/m2021-31/catgt_m2021-31_g4/...), for
+# sorting/configs/m2021-31_g4_hypoxia_window.yaml. On the lab drive: Z:/ramirezlab/nbush/projects/dynaresp/data/processed
+# dynaresp: D:/npx/dynaresp_processed

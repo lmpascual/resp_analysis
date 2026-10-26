@@ -171,7 +171,33 @@ About 2 h per window on a GPU (the intact window took 116 min). Then review the 
 review files of the shared sort won't apply, because the unit ids change. Settings, curation rules and why they were
 chosen: [sorting/README.md](sorting/README.md) and the analysis record.
 
-## 5. Known gaps
+## 5. The Bush & Ramirez 2024 gasping recordings
+
+Nick Bush's recordings for Bush & Ramirez 2024 (Nat Neurosci) include 39 gates with hypoxia-induced gasping (ChAT,
+Dbx1, Vgat and Vglut2 lines; Neuropixels 1.0). They are on the lab drive at `Z:/ramirezlab/nbush/projects/dynaresp`
+(not public: "available upon reasonable request"). Per gate, `data/processed/<mouse>/catgt_<mouse>_<gate>/` holds
+the NIDQ file and `<mouse>_<gate>_imec0/` with Nick's CatGT output (`-aphipass=300 -gbldmx -gfix`, the whole ~44 min
+gate) and his Kilosort 2 sort. Set `dynaresp` in `configs/local_paths.yaml` to that `processed` folder.
+
+m2021-31_g4 (Dbx1) is set up. `sorting/configs/m2021-31_g4_hypoxia_window.yaml` sorts 2050–2648 s of the gate: room
+air, hypercapnia, 10% O2 and gasping (timings from the gas-valve lines on the NIDQ; see the config). Its `nidq`
+section maps the NIDQ channels (diaphragm EMG on XA1, plethysmography on XA0).
+
+```bat
+conda activate npxsort
+cd sorting
+python run_sorting.py configs\m2021-31_g4_hypoxia_window.yaml
+cd ..
+conda activate cibrrig
+python analysis\population\population_dynamics.py --sort <outputs>\bush2024\m2021-31_g4\hypoxia_window --labels good --conditions-file analysis\population\configs\m2021-31_g4_conditions.json --out <outputs>\bush2024\m2021-31_g4\population_dynamics
+```
+
+`--labels good` uses bombcell-good units until the units are reviewed in the browser. Without it, the analysis uses
+the units reviewed `single`, as for e097. The gate ends while the mouse is still gasping, so there is no recovery
+period. For another gate: copy the config, change `input.folder`, the window, the epochs and `nidq.bin`, and write a
+conditions file from that gate's gas-valve times.
+
+## 6. Known gaps
 
 - Lupin isn't reproducible run to run, and Kilosort 4 on a GPU hasn't been tested for exact repeats (analysis record
   F6, O8). Use the shared sort to reproduce numbers.

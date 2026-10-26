@@ -81,6 +81,17 @@ curation:
 #     - {name: gasping, start_s: 85, end_s: 130}
 epochs: []
 
+# The run's NIDQ signals. The sorting doesn't use them; the breathing and population analyses (analysis/population)
+# read this section from the run's config_used.yaml. Raw-run time of the sorted window's start =
+# file_start_s + input.start_s; NIDQ samples are indexed at the nominal 10 kHz from there.
+nidq:
+  bin: null              # the run's .nidq.bin, e.g. ${raw_data}/e097_g2/e097_g2_t0.nidq.bin
+  n_channels: 9          # saved channels (nSavedChans in the .nidq.meta)
+  emg_channel: null      # raw diaphragm EMG (analog input index, XA<n>)
+  flow_channel: null     # airflow / plethysmography
+  ecg_channel: null
+  file_start_s: 0.0      # run time of input.folder's first sample: CatGT -startsecs for an extract, 0 for a whole run
+
 comparison:
   enabled: true
   delta_time_ms: 0.4
