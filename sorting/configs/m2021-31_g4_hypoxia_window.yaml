@@ -40,6 +40,9 @@ motion:
   # uncorrected and the stability stage measures each unit's shift in gasping_late (epochs below). If units shift
   # there, correct with a displacement from the sorted stable units, or stop isolation-sensitive analyses at
   # 480 s. The sorters' own drift correction is switched off too.
+  # Result (sort of 2026-10-26, good + mua units, hypercapnia -> gasping_late): median footprint shift -0.8 um
+  # (Kilosort 4, 247 units) and -0.2 um (Lupin, 404); 3% / 1% moved > 5 um, none consistently. The band shifts
+  # were changes in which neurons fire, not tissue movement, as in e097. No correction or cut at 480 s needed.
   enabled: false
 
 sorters:
