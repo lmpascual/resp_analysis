@@ -913,10 +913,10 @@ def state_examples_shared(runs):
     return [fig_state_examples_epochs(c, cond, out, rows_order, state_cols, xmax * 1.05) for c, cond, out in cs]
 
 
-def fig_states_pca_epochs(c, cond, out, dims=(0, 2), xlim=None, ylim=None, n_max=6000):
+def fig_states_pca_epochs(c, cond, out, dims=(0, 2), xlim=None, ylim=None, n_max=6000, tag=""):
     """K = 6 Viterbi states in one PC plane (default PC1-PC3; anoxia #1 baseline PCA), one panel per epoch in time
     order, each marked with its colour, number, raw span and breath count; the baseline cloud in light grey behind
-    every other panel."""
+    every other panel. c["P"] and c["ioff_point"] can come from another PCA: tag names it in the file name."""
     from matplotlib.patches import Rectangle
     dx, dy = dims
     xlim, ylim = xlim or PC_LIMITS[dx], ylim or PC_LIMITS[dy]
@@ -981,7 +981,7 @@ def fig_states_pca_epochs(c, cond, out, dims=(0, 2), xlim=None, ylim=None, n_max
                  "state's mean position in that epoch", x=0.01, ha="left", fontsize=11.5)
     fig.tight_layout(rect=(0, 0.07, 1, 0.96))
     suffix = "" if tuple(dims) == (0, 2) else f"_PC{dx + 1}-PC{dy + 1}"   # PC1-PC3 keeps its original name
-    path = out / f"hmm_states_pca_K{k}_by_epoch{suffix}.png"
+    path = out / f"hmm_states_pca{'_' + tag if tag else ''}_K{k}_by_epoch{suffix}.png"
     save_fig(fig, path, dpi=130)
     plt.close(fig)
     return path
