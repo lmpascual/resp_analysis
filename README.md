@@ -197,6 +197,13 @@ the units reviewed `single`, as for e097. The gate ends while the mouse is still
 period. For another gate: copy the config, change `input.folder`, the window, the epochs and `nidq.bin`, and write a
 conditions file from that gate's gas-valve times.
 
+m2020-19 (Vglut2) is the only mouse in this data that never had hypercapnia: room air, then N2, as in e097. Two of
+its gates are set up, sorted with Kilosort 4 only (see the configs for why): `m2020-19_g3_anoxia_window.yaml`
+(1140–1540 s: two N2 challenges with a hypoxia between; one of the paper's 39) and `m2020-19_g4_anoxia_window.yaml`
+(1140–1415 s: one N2 and 151 s of recovery). Run them like m2021-31_g4, with `--sort <outputs>\bush2024\m2020-19_g3\anoxia_window`
+or `...\m2020-19_g4\anoxia_window` and the matching `analysis\population\configs\m2020-19_g*_conditions.json`.
+This mouse's gas valves are on NIDQ digital bits 3 (N2) and 4 (hypoxia), which the gate list doesn't name.
+
 ## 6. Known gaps
 
 - Lupin isn't reproducible run to run, and Kilosort 4 on a GPU hasn't been tested for exact repeats (analysis record
