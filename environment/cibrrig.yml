@@ -15,6 +15,7 @@ dependencies:
   - python=3.12
   - pip
   - git
+  - ffmpeg=8.1.0                 # analysis/population/trajectory_movie.py: H.264 movies
   - pip:
       - numpy==1.26.4
       - scipy==1.17.1
