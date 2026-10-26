@@ -112,7 +112,7 @@ Run from the repository root. `<outputs>` stands for your `outputs` folder. Each
 | 5. Breathing, phase tuning, PETHs, HMM, PCA | cibrrig | see below (three commands) | `<outputs>\e097\population_dynamics_v2\` | 4 min each |
 | 6. Transitions eupnea → gasping → recovery | cibrrig | `python analysis\population\transition_windows.py` then `python analysis\population\transition_slides.py` | `population_dynamics_v2\transitions\` | 1 min |
 | 7. Anoxia #2 in the anoxia #1 state space | cibrrig | `python analysis\population\anoxia2_dynamics.py`, then `transition_windows.py --run <outputs>\e097\population_dynamics_anoxia2` and `transition_slides.py --run <outputs>\e097\population_dynamics_anoxia2 --no-manifest` | `<outputs>\e097\population_dynamics_anoxia2\` | — |
-| 8. Anoxia #1 vs #2 side by side | cibrrig | `python analysis\population\trial_compare.py` | `figures\compare\`, `epoch_metrics.tsv` in both runs | — |
+| 8. Anoxia #1 vs #2 side by side | cibrrig | `python analysis\population\trial_compare.py`; `python analysis\population\states_pca_3d.py` (HMM states in 3D PC1–PC3, every epoch of both trials togglable) | `figures\compare\`, `epoch_metrics.tsv` in both runs; `population_dynamics_v2\figures\hmm_states_pca_3d.html` | — |
 | 9. Slide decks | node / cibrrig | see below | `.pptx` | — |
 
 Step 4 (units):
@@ -201,8 +201,10 @@ conditions file from that gate's gas-valve times.
 
 - Lupin isn't reproducible run to run, and Kilosort 4 on a GPU hasn't been tested for exact repeats (analysis record
   F6, O8). Use the shared sort to reproduce numbers.
-- `state_examples_K6_by_epoch.png` and `hmm_states_pca_K6_by_epoch.png` in `population_dynamics_anoxia2\figures\`
-  come from functions in `transition_windows.py` (`state_examples_shared`, `fig_states_pca_epochs`) that no script
-  calls yet.
+- `state_examples_K6_by_epoch.png` and `hmm_states_pca_K6_by_epoch*.png` (PC1–PC3, `_PC1-PC2`, `_PC2-PC3`) in both
+  runs' `figures\` come from functions in `transition_windows.py` (`state_examples_shared`, `states_pca_shared`) that
+  no script calls yet. Call them with both run folders, e.g. `python -c "import sys; sys.path.insert(0,
+  r'analysis\population'); import transition_windows as tw; tw.states_pca_shared([tw.pdm.OUT /
+  'population_dynamics_v2', tw.pdm.OUT / 'population_dynamics_anoxia2'])"`.
 - Only e097's two anoxia windows and its laser window are analysed with this pipeline. The diving-reflex and pre-laser
   analyses, and the other animals, used the archived pipeline and haven't been redone.

@@ -61,6 +61,8 @@ N_CONTEXT = 15              # breaths of anoxia / early recovery either side of 
 TRAJ_BINS = 20              # cycle-phase bins per breath (10 inspiration, 10 expiration) for trajectory distances
 CYCLE_PRE_S, CYCLE_POST_S = 0.3, 2.8    # whole-cycle windows around inspiration onset (gasp cycles last up to 2.7 s)
 MIN_SPIKES = 20             # fewer spikes in a window: no preferred phase / class (a single spike gives L = 1)
+PC_LIMITS = {0: (-1.0, 2.0), 1: (-0.5, 1.0), 2: (-0.8, 0.8)}   # axis limits per PC in the by-epoch state figures
+                                                               # (both anoxia trials sit on anoxia #1's PCA axes)
 plt.rcParams.update({"font.size": 9, "axes.titlesize": 10})
 # cyclic phase colours without white (white means no spikes): post-I purple, mid-E blue, onset green, mid-I orange
 PHASE_CMAP = matplotlib.colors.LinearSegmentedColormap.from_list(
@@ -911,10 +913,14 @@ def state_examples_shared(runs):
     return [fig_state_examples_epochs(c, cond, out, rows_order, state_cols, xmax * 1.05) for c, cond, out in cs]
 
 
-def fig_states_pca_epochs(c, cond, out, xlim=(-1.0, 2.0), ylim=(-0.8, 0.8), n_max=6000):
-    """K = 6 Viterbi states in PC1-PC3 (anoxia #1 baseline PCA), one panel per epoch in time order, each marked with
-    its colour, number, raw span and breath count; the baseline cloud in light grey behind every other panel."""
+def fig_states_pca_epochs(c, cond, out, dims=(0, 2), xlim=None, ylim=None, n_max=6000):
+    """K = 6 Viterbi states in one PC plane (default PC1-PC3; anoxia #1 baseline PCA), one panel per epoch in time
+    order, each marked with its colour, number, raw span and breath count; the baseline cloud in light grey behind
+    every other panel."""
     from matplotlib.patches import Rectangle
+    dx, dy = dims
+    xlim, ylim = xlim or PC_LIMITS[dx], ylim or PC_LIMITS[dy]
+    plane = f"PC{dx + 1}–PC{dy + 1}"
     k = c["ref_k"]
     P, off = c["P"], c["time_offset_s"]
     ons = c["dia_df"]["on_sec"].to_numpy()
@@ -937,15 +943,15 @@ def fig_states_pca_epochs(c, cond, out, xlim=(-1.0, 2.0), ylim=(-0.8, 0.8), n_ma
         idx = np.flatnonzero(bcond == name)
         sub = idx if idx.size <= n_max else np.sort(rng.choice(idx, n_max, replace=False))
         if name != "baseline":
-            ax.scatter(P[base, 0], P[base, 2], s=2, color="#e3e2dd", edgecolor="none", zorder=1, rasterized=True)
-        ax.scatter(P[sub, 0], P[sub, 2], c=[state_colour(c, k, s) for s in seq[sub]], s=3, alpha=0.6,
+            ax.scatter(P[base, dx], P[base, dy], s=2, color="#e3e2dd", edgecolor="none", zorder=1, rasterized=True)
+        ax.scatter(P[sub, dx], P[sub, dy], c=[state_colour(c, k, s) for s in seq[sub]], s=3, alpha=0.6,
                    edgecolor="none", zorder=2, rasterized=True)
         for s in range(k):
             m = seq[idx] == s
             if m.sum() > 20:
-                ax.scatter(P[idx[m], 0].mean(), P[idx[m], 2].mean(), color=state_colour(c, k, s), s=110,
+                ax.scatter(P[idx[m], dx].mean(), P[idx[m], dy].mean(), color=state_colour(c, k, s), s=110,
                            edgecolor=INK, lw=0.9, zorder=4)
-        ax.scatter(*c["ioff_point"][[0, 2]], color=INK, marker="X", s=70, zorder=5)
+        ax.scatter(*c["ioff_point"][[dx, dy]], color=INK, marker="X", s=70, zorder=5)
         b = np.flatnonzero(cond == name)
         t0, t1 = ons[b[0]] + off, ons[min(b[-1] + 1, ons.size - 1)] + off
         ax.add_patch(Rectangle((0, 1.0), 1, 0.07, transform=ax.transAxes, color=colours.get(name, "#cccccc"),
@@ -956,9 +962,9 @@ def fig_states_pca_epochs(c, cond, out, xlim=(-1.0, 2.0), ylim=(-0.8, 0.8), n_ma
         ax.set_xlim(xlim)
         ax.set_ylim(ylim)
         if i % ncol == 0:
-            ax.set_ylabel("PC3")
+            ax.set_ylabel(f"PC{dy + 1}")
         if i >= len(order) - ncol:
-            ax.set_xlabel("PC1")
+            ax.set_xlabel(f"PC{dx + 1}")
     for ax in axes.ravel()[len(order):]:
         ax.axis("off")
     order_s = np.argsort(c["colours"][k])
@@ -970,14 +976,26 @@ def fig_states_pca_epochs(c, cond, out, xlim=(-1.0, 2.0), ylim=(-0.8, 0.8), n_ma
     labels = [tsl.state_name(f.loc[s, "label"]) for s in order_s] + ["baseline inspiration-off point",
                                                                        "baseline points (reference)"]
     fig.legend(handles, labels, loc="lower center", ncol=4, frameon=False, fontsize=10.5)
-    fig.suptitle(trial_prefix(c) + f"K = {k} HMM states in PC1–PC3 (PCA fit on {c.get('pca_fit', 'baseline')}), one "
+    fig.suptitle(trial_prefix(c) + f"K = {k} HMM states in {plane} (PCA fit on {c.get('pca_fit', 'baseline')}), one "
                  "panel per epoch in time order.\nSmall dots: 5 ms bins coloured by Viterbi state; big dots: each "
                  "state's mean position in that epoch", x=0.01, ha="left", fontsize=11.5)
     fig.tight_layout(rect=(0, 0.07, 1, 0.96))
-    path = out / f"hmm_states_pca_K{k}_by_epoch.png"
+    suffix = "" if tuple(dims) == (0, 2) else f"_PC{dx + 1}-PC{dy + 1}"   # PC1-PC3 keeps its original name
+    path = out / f"hmm_states_pca_K{k}_by_epoch{suffix}.png"
     save_fig(fig, path, dpi=130)
     plt.close(fig)
     return path
+
+
+def states_pca_shared(runs, planes=((0, 2), (0, 1), (1, 2))):
+    """fig_states_pca_epochs in each PC plane for several trials projected on the same PCA axes (same limits), written
+    to each run's figures/."""
+    paths = []
+    for run in runs:
+        c = load_context(run)
+        cond = label_transitions(c["cond"])[0]
+        paths += [fig_states_pca_epochs(c, cond, run / "figures", dims=d) for d in planes]
+    return paths
 
 
 def pca_summary_shared(runs):
