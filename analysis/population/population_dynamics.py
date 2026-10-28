@@ -158,6 +158,9 @@ def parse_args():
     p.add_argument("--n-restarts", type=int, default=10)
     p.add_argument("--n-iter", type=int, default=300)
     p.add_argument("--n-jobs", type=int, default=8)
+    p.add_argument("--title", default=None,
+                   help="recording name in figure and slide titles (default: 'e097 anoxia #1' for the default sort, "
+                        "otherwise the sort config's experiment_name)")
     p.add_argument("--figures-only", action="store_true", help="redraw figures from <out>/cache/ctx.pkl")
     p.add_argument("--out", required=True)
     a = p.parse_args()
@@ -529,6 +532,8 @@ def main():
         figs.make_all(ctx)
         return
     cfg = yaml.safe_load(Path(a.config).read_text())
+    title = a.title or ("e097 anoxia #1" if Path(a.sort) == SORT else cfg.get("experiment_name", Path(a.sort).name))
+    unit_desc = f"bombcell-{a.labels} units, not reviewed" if a.labels else "reviewed single units"
     nq = nidq_settings(a, cfg)
     log.info("window %.1f-%.1f s of the run; NIDQ %s (EMG XA%d, airflow XA%d)", a.time_offset_s,
              a.time_offset_s + a.window_s, nq["bin"], nq["emg"], nq["flow"])
@@ -611,7 +616,8 @@ def main():
                bcond=bcond, X=X, ks=ks, ref_k=ref_k, F=F, colours=colours, sims=sims, sel=sel, models=models,
                curve_bins=curve_bins, curves=curves, tuning=tuning, Z=Z, pca=pca, P=P, speed=speed,
                ioff_point=ioff_point, pa_names=pa_names, pa_M=pa_M, conditions=[c for c, _ in CONDITIONS],
-               palette=PALETTE, cond_colours=COND_COLOURS, hmm_bin_s=HMM_BIN_S, pca_bin_s=PCA_BIN_S)
+               palette=PALETTE, cond_colours=COND_COLOURS, hmm_bin_s=HMM_BIN_S, pca_bin_s=PCA_BIN_S,
+               title=title, unit_desc=unit_desc)
     with open(out / "cache" / "ctx.pkl", "wb") as f:
         pickle.dump(ctx, f)
     figs.make_all(ctx)

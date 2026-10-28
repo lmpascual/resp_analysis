@@ -526,6 +526,10 @@ def unit_story(c, u):
     after_gasp = conds[conds.index("gasping") + 1:]
     first, last = after_gasp[0], after_gasp[-1]          # e.g. early recovery, later recovery
     base, gasp, rec, post = r["baseline"], r["gasping"], r[first], r[last]
+    # the challenge before gasping: anoxia in e097, else the last condition before gasping (e.g. hypoxia)
+    before = [x for x in conds[:conds.index("gasping")] if x != "baseline"]
+    chal = "anoxia" if "anoxia" in r else (before[-1] if before else "the challenge")
+    r_chal = r.get(chal, np.nan)
     t, P = peths(c, u, "on")
     feat = {x: peth_features(t, P[x][0]) for x in P}
     ramp_in = ("gasping" in feat and feat["gasping"]["ramp_ratio_last50_vs_early"] >= 2.5
@@ -534,11 +538,11 @@ def unit_story(c, u):
         group = "silent at baseline"
         kind = "Unit silent at baseline"
         if gasp >= 1:
-            act = "fires during anoxia and gasping" if r["anoxia"] >= 1 else "fires only around the gasps"
+            act = f"fires during {chal} and gasping" if r_chal >= 1 else "fires only around the gasps"
             if ramp_in:
                 act = "ramps up into each gasp"
-        elif r["anoxia"] >= 1:
-            act = "fires mainly during anoxia"
+        elif r_chal >= 1:
+            act = f"fires mainly during {chal}"
         else:
             act = "barely fires"
         after = "silent again afterwards" if not post >= 0.2 else "keeps firing afterwards"
@@ -614,7 +618,7 @@ def write_slide_manifest(c):
                      "peth": str(c["slide_out"] / f"unit_{u}_peth.png")})
     order = {g: i for i, (g, _) in enumerate(SLIDE_GROUPS)}
     rows.sort(key=lambda x: order.get(x["group"], 99))
-    manifest = {"title": f"e097 anoxia #1: {len(rows)} reviewed single units",
+    manifest = {"title": f"{c.get('title', 'e097 anoxia #1')}: {len(rows)} {c.get('unit_desc', 'reviewed single units')}",
                 "subtitle": f"Spikes on every breath, and PETHs and phase curves from baseline to {c['conditions'][-1]}",
                 "groups": [{"key": g, "title": t, "n": sum(r["group"] == g for r in rows)} for g, t in SLIDE_GROUPS],
                 "condition_colours": c["cond_colours"], "conditions": condition_spans_raw(c), "units": rows,
