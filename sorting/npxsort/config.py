@@ -92,6 +92,13 @@ def _validate(cfg: dict) -> None:
             raise ConfigError("motion.enabled is true, so sorters.kilosort4.params.do_correction must not be true.")
         if cfg["sorters"]["lupin"]["params"].get("apply_motion_correction", False):
             raise ConfigError("motion.enabled is true, so sorters.lupin.params.apply_motion_correction must not be true.")
+    bridges = cfg["motion"]["bridge_s"]
+    if not isinstance(bridges, list) or not all(
+            isinstance(w, (list, tuple)) and len(w) == 2 and all(isinstance(x, (int, float)) for x in w) and 0 <= w[0] < w[1]
+            for w in bridges):
+        raise ConfigError("motion.bridge_s must be a list of [start_s, end_s] pairs with 0 <= start_s < end_s.")
+    if bridges and not cfg["motion"]["enabled"]:
+        raise ConfigError("motion.bridge_s is set but motion.enabled is false.")
 
     seen = set()
     for i, e in enumerate(cfg["epochs"]):

@@ -26,6 +26,8 @@ outputs/
 *.hdf5
 *.pkl
 *.log
+# ... except the motion maps a sort config applies (small; anchor_motion.py apply loads them)
+!sorting/configs/motion/**/*.npy
 
 # Presentations and media
 *.pptx

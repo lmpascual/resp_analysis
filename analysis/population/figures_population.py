@@ -151,7 +151,8 @@ def fig_overview(c):
             shade(ax, c)
         ax.set_xlim(off, off + c["dia_sub"].size / c["sr_sub"])
     axes[-1].set_xlabel("raw-run time (s)")
-    fig.suptitle(f"e097 anoxia #1: {len(c['ids'])} reviewed single units (preliminary sort snapshot)", x=0.01, ha="left")
+    fig.suptitle(f"{c.get('title', 'e097 anoxia #1')}: {len(c['ids'])} {c.get('unit_desc', 'reviewed single units')}",
+                 x=0.01, ha="left")
     fig.tight_layout(rect=(0, 0, 1, 0.975))
     save_fig(fig, c["out"] / "overview.png", dpi=110)
     plt.close(fig)
@@ -884,7 +885,7 @@ def fig_breathing_epochs(c):
         axb.axis("on")
         axb.set_yticks([])
         axb.spines[["left", "right", "top"]].set_visible(False)
-        fig.suptitle("e097 anoxia #1: breathing rate and conditions", x=0.01, ha="left", fontsize=14)
+        fig.suptitle(f"{c.get('title', 'e097 anoxia #1')}: breathing rate and conditions", x=0.01, ha="left", fontsize=14)
         fig.tight_layout(h_pad=0.4)
         save_fig(fig, c["out"] / "breathing_epochs.png", dpi=200)
         plt.close(fig)

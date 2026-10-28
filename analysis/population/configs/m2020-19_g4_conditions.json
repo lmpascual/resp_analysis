@@ -1,0 +1,11 @@
+{
+ "recording": "m2020-19_g4 anoxia window (gate time; sort config sorting/configs/m2020-19_g4_anoxia_window.yaml)",
+ "source": "gas valve switches on the NIDQ digital lines (bit 3 N2); laser (bit 0) from 1419.3 s",
+ "conditions": [
+  {"name": "baseline", "start_raw_s": 1140.0, "end_raw_s": 1201.7, "source": "room air", "colour": "#6a6a66"},
+  {"name": "anoxia", "start_raw_s": 1201.7, "end_raw_s": 1257.0, "source": "N2 valve; breaths before gasping", "colour": "#f2918a"},
+  {"name": "gasping", "rule": "gasp_flag", "source": "Bush & Ramirez 2024: 7-breath median IBI > 1 s until < 0.85 s", "colour": "#d93636"},
+  {"name": "early recovery", "start_raw_s": 1257.0, "end_raw_s": 1340.0, "source": "room air, up to ~75 s after gasping ends; non-gasp breaths", "colour": "#77c06a"},
+  {"name": "late recovery", "start_raw_s": 1340.0, "end_raw_s": 1415.0, "source": "room air until the window end (laser at 1419.3 s)", "colour": "#1c9157"}
+ ]
+}

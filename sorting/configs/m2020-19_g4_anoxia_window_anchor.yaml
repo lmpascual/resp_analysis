@@ -1,0 +1,67 @@
+# m2020-19_g4, 1140-1415 s gate time, corrected for the tissue move during gasping with a motion map measured from the
+# units the uncorrected sort split (option A, 2026-10-27). Recording, timings and epochs as m2020-19_g4_anoxia_window.yaml;
+# that config is the bridged rigid-DREDGE alternative (option 1).
+#
+# Why a map from units: in the uncorrected sort (outputs/.../m2020-19_g4/anoxia_window_uncorrected) every neuron's
+# cluster ends at the move and a new cluster with the same waveform starts further from the tip. The pairs give the
+# displacement by depth: +38 to +47 um from the tip to ~2600 um and +70 to +75 um above ~3000 um (29 pairs, template
+# cosine 0.88-0.99; anchors.tsv). DREDGE gets the upper probe wrong and fails during gasping. The move's timing comes from
+# the spike-depth histograms: the deep tissue moves over 98-117 s file time, the upper tissue over ~100-140 s.
+#
+# Input: the uncorrected run's preprocessed recording shifted by the map (kriging), made with
+#   python anchor_motion.py build ../outputs/bush2024/m2020-19_g4/anoxia_window_uncorrected --before 20-90 ^
+#       --after 145-275 --ramp 98-117 --ramp-top 100-140 --ramp-blend 2000-2900 --out configs/motion/m2020-19_g4_anchor_map
+#   python anchor_motion.py apply configs/motion/m2020-19_g4_anchor_map ^
+#       <scratch>/bush2024_m2020-19_g4_anoxia_window_uncorrected/preprocessed <scratch>/bush2024_m2020-19_g4_anchor_corrected
+# The uncorrected run is m2020-19_g4_anoxia_window.yaml with motion.enabled: false (see its 2026-10-26 config_used.yaml).
+# Check after correction (outputs/.../m2020-19_g4/anchor_check): the spike bands at 285, 1040, 1340, 1620 and 2540 um
+# keep their baseline depth within ~5 um through recovery (285 um eases ~9 um late).
+# Spike times are seconds from 1140 s; add 1140 for gate time.
+
+experiment_name: m2020-19_g4_anoxia_window_275s_anchor
+
+paths:
+  output_dir: ${outputs}/bush2024/m2020-19_g4/anoxia_window_anchor
+  scratch_dir: ${scratch}/bush2024_m2020-19_g4_anoxia_window_anchor   # ~6 GB preprocessed binary + sorter folder
+
+input:
+  source: si_folder      # already preprocessed and motion-corrected (above)
+  folder: ${scratch}/bush2024_m2020-19_g4_anchor_corrected
+  start_s: null          # the folder holds only the window
+  duration_s: 275.0
+
+motion:
+  enabled: false         # corrected before sorting, with the anchor map
+
+sorters:
+  kilosort4:
+    enabled: true
+    params:
+      torch_device: cuda
+      do_correction: false
+  lupin:
+    enabled: false       # as in m2020-19_g4_anoxia_window.yaml
+
+job_kwargs:
+  n_jobs: 12
+
+# File time (gate time - 1140 s), from the valve lines and the Bush gasp rule.
+epochs:
+  - {name: baseline, start_s: 0, end_s: 61.7}           # room air
+  - {name: anoxia, start_s: 61.7, end_s: 93}            # N2 until the first gasp
+  - {name: gasping, start_s: 93, end_s: 124}
+  - {name: recovery_early, start_s: 124, end_s: 200}
+  - {name: recovery_late, start_s: 200, end_s: 275}
+
+nidq:
+  bin: ${dynaresp}/m2020-19/catgt_m2020-19_g4/m2020-19_g4_t0.nidq.bin
+  n_channels: 9          # XA0-XA7 + one digital word
+  emg_channel: 1         # XA1 raw diaphragm EMG
+  flow_channel: 0        # XA0 plethysmography
+  ecg_channel: null
+  file_start_s: 1140.0   # the input folder starts 1140 s into the gate
+
+curation:
+  threshold_overrides:
+    mua:
+      presence_ratio: null   # as for e097 (D4): units may fall silent during gasping

@@ -112,7 +112,7 @@ Run from the repository root. `<outputs>` stands for your `outputs` folder. Each
 | 5. Breathing, phase tuning, PETHs, HMM, PCA | cibrrig | see below (three commands) | `<outputs>\e097\population_dynamics_v2\` | 4 min each |
 | 6. Transitions eupnea → gasping → recovery | cibrrig | `python analysis\population\transition_windows.py` then `python analysis\population\transition_slides.py` | `population_dynamics_v2\transitions\` | 1 min |
 | 7. Anoxia #2 in the anoxia #1 state space | cibrrig | `python analysis\population\anoxia2_dynamics.py`, then `transition_windows.py --run <outputs>\e097\population_dynamics_anoxia2` and `transition_slides.py --run <outputs>\e097\population_dynamics_anoxia2 --no-manifest` | `<outputs>\e097\population_dynamics_anoxia2\` | — |
-| 8. Anoxia #1 vs #2 side by side | cibrrig | `python analysis\population\trial_compare.py`; `python analysis\population\states_pca_3d.py` (HMM states in 3D PC1–PC3, every epoch of both trials togglable) | `figures\compare\`, `epoch_metrics.tsv` in both runs; `population_dynamics_v2\figures\hmm_states_pca_3d.html` | — |
+| 8. Anoxia #1 vs #2 side by side | cibrrig | `python analysis\population\trial_compare.py`; `python analysis\population\states_pca_3d.py` (HMM states in 3D PC1–PC3, every epoch of both trials togglable); `python analysis\population\pca_softnorm.py` (a soft-normalised PCA beside the Bush & Ramirez one; analysis record D13, F18); `python analysis\population\transition_movie.py [--run <run>]` (time-lapse GIF of the epochs fading one into the next in 3D PC1–PC3, one fixed angle); `python analysis\population\trajectory_movie.py [--run <run>] [--pcs 1,3,2]` (MP4 in the style of the Bush & Ramirez 2024 supplementary video: diaphragm, raster and every 5 ms bin in 3D from eupnea through gasping to recovery; needs ffmpeg for H.264) | `figures\compare\`, `epoch_metrics.tsv` in both runs; `population_dynamics_v2\figures\hmm_states_pca_3d.html`; `hmm_states_pca_softnorm_K6_by_epoch*.png` in both runs, `population_dynamics_v2\figures\pca_pc2_single_unit_steps.png`; `transitions\movie\` in each run | — |
 | 9. Slide decks | node / cibrrig | see below | `.pptx` | — |
 
 Step 4 (units):
@@ -171,7 +171,45 @@ About 2 h per window on a GPU (the intact window took 116 min). Then review the 
 review files of the shared sort won't apply, because the unit ids change. Settings, curation rules and why they were
 chosen: [sorting/README.md](sorting/README.md) and the analysis record.
 
-## 5. Known gaps
+## 5. The Bush & Ramirez 2024 gasping recordings
+
+Nick Bush's recordings for Bush & Ramirez 2024 (Nat Neurosci) include 39 gates with hypoxia-induced gasping (ChAT,
+Dbx1, Vgat and Vglut2 lines; Neuropixels 1.0). They are on the lab drive at `Z:/ramirezlab/nbush/projects/dynaresp`
+(not public: "available upon reasonable request"). Per gate, `data/processed/<mouse>/catgt_<mouse>_<gate>/` holds
+the NIDQ file and `<mouse>_<gate>_imec0/` with Nick's CatGT output (`-aphipass=300 -gbldmx -gfix`, the whole ~44 min
+gate) and his Kilosort 2 sort. Set `dynaresp` in `configs/local_paths.yaml` to that `processed` folder.
+
+m2021-31_g4 (Dbx1) is set up. `sorting/configs/m2021-31_g4_hypoxia_window.yaml` sorts 2050–2648 s of the gate: room
+air, hypercapnia, 10% O2 and gasping (timings from the gas-valve lines on the NIDQ; see the config). Its `nidq`
+section maps the NIDQ channels (diaphragm EMG on XA1, plethysmography on XA0).
+
+```bat
+conda activate npxsort
+cd sorting
+python run_sorting.py configs\m2021-31_g4_hypoxia_window.yaml
+cd ..
+conda activate cibrrig
+python analysis\population\population_dynamics.py --sort <outputs>\bush2024\m2021-31_g4\hypoxia_window --labels good --conditions-file analysis\population\configs\m2021-31_g4_conditions.json --out <outputs>\bush2024\m2021-31_g4\population_dynamics
+```
+
+`--labels good` uses bombcell-good units until the units are reviewed in the browser. Without it, the analysis uses
+the units reviewed `single`, as for e097. The gate ends while the mouse is still gasping, so there is no recovery
+period. For another gate: copy the config, change `input.folder`, the window, the epochs and `nidq.bin`, and write a
+conditions file from that gate's gas-valve times.
+
+m2020-19 (Vglut2) is the only mouse in this data that never had hypercapnia: room air, then N2, as in e097. Two of
+its gates are set up, sorted with Kilosort 4 only: g3 (1140–1540 s: two N2 challenges with a hypoxia between; one of
+the paper's 39) and g4 (1140–1415 s: one N2 and 151 s of recovery). In this mouse the tissue moves 40–130 µm during
+gasping, more toward the top of the probe, and an uncorrected sort splits every neuron across the move. The gates are
+therefore sorted from recordings corrected with a motion map measured from the units an uncorrected sort split
+(`sorting/anchor_motion.py`; configs `m2020-19_g*_anoxia_window_anchor.yaml` with the build and apply commands in
+their headers; maps in `sorting/configs/motion/`). Bridged rigid DREDGE (`motion.bridge_s`, configs
+`m2020-19_g*_anoxia_window.yaml`) kept fewer neurons as one unit across the move and is kept only for comparison. Run
+the population analysis like m2021-31_g4, with `--sort <outputs>\bush2024\m2020-19_g3\anoxia_window_anchor` (or g4) and
+the matching `analysis\population\configs\m2020-19_g*_conditions.json`. This mouse's gas valves are on NIDQ digital
+bits 3 (N2) and 4 (hypoxia), which the gate list doesn't name.
+
+## 6. Known gaps
 
 - Lupin isn't reproducible run to run, and Kilosort 4 on a GPU hasn't been tested for exact repeats (analysis record
   F6, O8). Use the shared sort to reproduce numbers.
