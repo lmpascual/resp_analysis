@@ -198,11 +198,16 @@ period. For another gate: copy the config, change `input.folder`, the window, th
 conditions file from that gate's gas-valve times.
 
 m2020-19 (Vglut2) is the only mouse in this data that never had hypercapnia: room air, then N2, as in e097. Two of
-its gates are set up, sorted with Kilosort 4 only (see the configs for why): `m2020-19_g3_anoxia_window.yaml`
-(1140–1540 s: two N2 challenges with a hypoxia between; one of the paper's 39) and `m2020-19_g4_anoxia_window.yaml`
-(1140–1415 s: one N2 and 151 s of recovery). Run them like m2021-31_g4, with `--sort <outputs>\bush2024\m2020-19_g3\anoxia_window`
-or `...\m2020-19_g4\anoxia_window` and the matching `analysis\population\configs\m2020-19_g*_conditions.json`.
-This mouse's gas valves are on NIDQ digital bits 3 (N2) and 4 (hypoxia), which the gate list doesn't name.
+its gates are set up, sorted with Kilosort 4 only: g3 (1140–1540 s: two N2 challenges with a hypoxia between; one of
+the paper's 39) and g4 (1140–1415 s: one N2 and 151 s of recovery). In this mouse the tissue moves 40–130 µm during
+gasping, more toward the top of the probe, and an uncorrected sort splits every neuron across the move. The gates are
+therefore sorted from recordings corrected with a motion map measured from the units an uncorrected sort split
+(`sorting/anchor_motion.py`; configs `m2020-19_g*_anoxia_window_anchor.yaml` with the build and apply commands in
+their headers; maps in `sorting/configs/motion/`). Bridged rigid DREDGE (`motion.bridge_s`, configs
+`m2020-19_g*_anoxia_window.yaml`) kept fewer neurons as one unit across the move and is kept only for comparison. Run
+the population analysis like m2021-31_g4, with `--sort <outputs>\bush2024\m2020-19_g3\anoxia_window_anchor` (or g4) and
+the matching `analysis\population\configs\m2020-19_g*_conditions.json`. This mouse's gas valves are on NIDQ digital
+bits 3 (N2) and 4 (hypoxia), which the gate list doesn't name.
 
 ## 6. Known gaps
 

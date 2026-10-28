@@ -26,9 +26,23 @@ input:
   duration_s: 275.0
 
 motion:
-  # Off, as for e097 (D2) and m2021-31_g4: DREDGE misreads the activity changes of gasping as motion, and the
-  # stability stage of m2021-31_g4 found units moved < 1 um. The stability stage checks this window per epoch.
-  enabled: false
+  # On, unlike e097 (D2) and m2021-31_g4. The uncorrected sort of 2026-10-26 (now anoxia_window_uncorrected/) showed
+  # the tissue moving during gasping: every dense spike band steps ~40 um away from the tip and stays (rigid DREDGE
+  # +49 -> +29 um after gasping, +-1 um before), and Kilosort 4 split the neurons across the step (10 of 15 good units
+  # silent after the first gasp, new units appearing, summed activity unchanged). DREDGE fails during gasping itself
+  # (213-329 um), as in e097 and m2021-31_g4, so the gasping seconds are bridged: their spikes are left out of the
+  # estimate and the displacement is a straight line across them. Rigid; max_disp_um raised above DREDGE's ~100 um
+  # default.
+  # Not the one used (2026-10-28): the move is larger toward the top of the probe (+40 um deep, ~+75 um above 3000 um),
+  # and this rigid correction kept only 44 of 69 of Nick's Kilosort 3 units as one unit across it, against 86 of 93 for
+  # the anchor map (m2020-19_g4_anoxia_window_anchor.yaml), which the analyses use. A bridged nonrigid DREDGE (800 um
+  # windows) was no better. Kept to document the comparison; its sort is outputs/.../m2020-19_g4/anoxia_window.
+  enabled: true
+  preset: dredge
+  estimate_motion_kwargs:
+    rigid: true
+    max_disp_um: 200
+  bridge_s: [[88, 125]]      # Bush-rule gasping 94.6-122.9 s file time
 
 sorters:
   kilosort4:

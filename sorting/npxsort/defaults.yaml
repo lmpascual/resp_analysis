@@ -38,6 +38,8 @@ motion:
   detect_kwargs: {}
   estimate_motion_kwargs: {}
   interpolate_motion_kwargs: {}
+  bridge_s: []         # [[start_s, end_s], ...] file time: leave these windows' spikes out of the estimate and draw a
+                       # straight line across them (for gasping, where registration by spike density fails)
 
 sorters:
   kilosort4:
