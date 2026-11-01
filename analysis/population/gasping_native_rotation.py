@@ -327,6 +327,78 @@ def figure(res, run_name, norm, out):
     plt.close(fig)
 
 
+def explainer_figure(res, run_name, norm, out,
+                     want=("baseline", "anoxia", "gasping", "later recovery")):
+    """The contrast in one figure, with the two rows read differently.
+
+    Top row: each epoch's cycle in its OWN coordinates. Each panel has its own PCA, so position,
+    orientation, scale and the sign of each axis are arbitrary -- only the SHAPE of a panel is
+    meaningful, and panels cannot be compared to each other by position.
+
+    Bottom row: every epoch in ONE fixed plane, the plane in which the eupneic cycle rotates best,
+    carried over unchanged. This is B24's approach (fit on 100% O2, apply throughout) and here the
+    panels DO share an origin and axes, so positions are comparable.
+
+    Markers follow the paper's own phase convention: phi = 0 is inspiration onset and phi = pi is
+    inspiration offset, so mean-cycle bin 0 spans [-pi, -pi + pi/25) -- exactly the window B25 uses
+    to define the inspiration-off point.
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    by = {r["epoch"]: r for r in res["rows"]}
+    use = [e for e in want if e in by]
+    if "baseline" not in by or len(use) < 2:
+        return
+    base_pca = res["base_pca"]
+    n_phase = by[use[0]]["_cycle"].shape[0]
+    i_off, i_on = 0, n_phase // 2
+
+    def to_base(cycle):
+        return (cycle - base_pca.mean_) @ base_pca.components_.T
+
+    B = to_base(by["baseline"]["_cycle"])
+    origin = B.mean(axis=0)
+    W = PCA(2).fit(B - origin).components_.T          # fixed eupneic rotation plane
+    shared = {e: (to_base(by[e]["_cycle"]) - origin) @ W for e in use}
+    lim = 1.15 * max(np.abs(np.concatenate(list(shared.values()))).max(), 1e-9)
+
+    fig, ax = plt.subplots(2, len(use), figsize=(2.9 * len(use), 6.4), squeeze=False)
+    for j, ep in enumerate(use):
+        C = by[ep]["_cycle"] - by[ep]["_cycle"].mean(axis=0)
+        native = PCA(min(N_PCS, C.shape[1])).fit(C).transform(C)[:, :2]
+        for i, (P2, a) in enumerate([(native, ax[0][j]), (shared[ep], ax[1][j])]):
+            a.plot(np.r_[P2[:, 0], P2[0, 0]], np.r_[P2[:, 1], P2[0, 1]], "-", lw=1.8, color="#2a78d6")
+            a.scatter(*P2[i_off], s=46, color="#e34948", zorder=4, label="inspiration-off")
+            a.scatter(*P2[i_on], s=46, facecolor="none", edgecolor="#1baf7a", lw=1.8, zorder=4,
+                      label="inspiration onset")
+            k = n_phase // 8
+            a.annotate("", xy=P2[k + 1], xytext=P2[k],
+                       arrowprops=dict(arrowstyle="-|>", color="#2a78d6", lw=1.8))
+            a.set_xticks([]), a.set_yticks([])
+            if i == 0:
+                a.set_aspect("equal", "datalim")
+                a.set_title(f"{ep} (n={by[ep]['n_cycles']})\nown coordinates — RI "
+                            f"{rotation_index(P2):.2f}", fontsize=8)
+            else:
+                a.set_aspect("equal")
+                a.set_xlim(-lim, lim), a.set_ylim(-lim, lim)
+                a.set_title(f"eupneic basis — RI {rotation_index(P2):.2f}", fontsize=8)
+            if j == 0 and i == 0:
+                a.legend(fontsize=6, loc="upper left", frameon=False)
+    ax[0][0].set_ylabel("own coordinates\n(shape only; position not comparable)", fontsize=7)
+    ax[1][0].set_ylabel("one fixed eupneic plane\n(shared axes; position comparable)", fontsize=7)
+    fig.suptitle(
+        f"{run_name}: the phase-averaged cycle, {norm}. Top — each epoch in its own basis. "
+        f"Bottom — all epochs in the eupneic basis (B24's approach).\n"
+        f"RI: 1 = circle, 0 = a retraced line. Red = inspiration-off, open green = inspiration "
+        f"onset, arrow = direction of travel.", fontsize=9)
+    fig.tight_layout(rect=(0.01, 0, 1, 0.93))
+    fig.savefig(Path(out) / f"{run_name}_{norm}_basis_contrast.png", dpi=180)
+    plt.close(fig)
+
+
 # ------------------------------------------------------------------ main
 
 def main():
@@ -339,7 +411,8 @@ def main():
 
     summary = {}
     for run in a.runs:
-        name = Path(run).name
+        # include the parent: several recordings use the same leaf name (population_dynamics_anchor)
+        name = f"{Path(run).parent.name}_{Path(run).name}"
         if not (Path(run) / "cache" / "ctx.pkl").exists():
             print(f"skip {name}: no ctx.pkl")
             continue
@@ -350,6 +423,7 @@ def main():
             if res is None:
                 continue
             figure(res, name, norm, out)
+            explainer_figure(res, name, norm, out)
             summary[name][norm] = [{k: v for k, v in r.items() if not k.startswith("_")} for r in res["rows"]]
             print(f"\n=== {name} / {norm} ===")
             print(f"{'epoch':<16}{'cyc':>5}{'L2/L1':>7}{'L3/L1':>7}{'RIcyc':>7}{'RIcyc cv':>10}"
