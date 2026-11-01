@@ -254,9 +254,12 @@ basis natively vs projecting through the baseline basis, and measures the cycle'
    ED Fig 8 within e097.
 
 **Reading:** in e097 anoxia #1 the gasping population trajectory is rotational in its own
-coordinates — by these measures at least as rotational as eupnea. That is direct support for the
-basis argument of §1: B24's "ballistic, all-or-none" is, here, substantially an artifact of
-viewing gasping through a eupnea-fit basis.
+coordinates — by these measures at least as rotational as eupnea.
+
+> ⚠️ **Superseded by §10.** This was read as support for the basis argument of §1 — that B24's
+> "ballistic, all-or-none" is substantially an artifact of a eupnea-fit basis. **Testing two gates
+> of one of the 2024 paper's own animals did not replicate it.** e097 anoxia #1 is the outlier, not
+> the rule. The basis-cost part of the result does replicate; the native-rotation part does not.
 
 ### What this does not establish
 
@@ -292,3 +295,230 @@ The recovery limb is the open question and the two normalisations **disagree**: 
 subspace never returns to baseline (cos∠ 0.31–0.36 through later recovery, 220 cycles), in sqrt it
 does (0.91). That bears directly on reanchoring (§3) and should be resolved before anything is
 claimed about the recovery limb.
+
+---
+
+## 8. The analysis in plain terms
+
+### Input
+From each run's cached `ctx.pkl`: `Z`, an (84,000 × 28) matrix for anoxia #1 — spikes in 5 ms bins,
+10 ms Gaussian smoothing, square-rooted, 420 s × 28 units; `ph`, respiratory phase per bin; `bcond`,
+the epoch each bin belongs to; `dia_df`, one row per breath.
+
+### Per-unit scaling: sqrt vs softnorm
+A choice made **before** PCA, and it matters because PCA finds directions of maximum *variance*, so
+whichever units swing hardest numerically dominate the components.
+
+- **sqrt** — what Bush & Ramirez do: `sqrt(smoothed counts)`. The square root is a variance-stabilising
+  transform for Poisson-ish counts (variance becomes roughly independent of rate), but there is no
+  per-unit rescaling, so an 80 Hz unit contributes far more variance than a 3 Hz unit regardless of
+  which is more respiratory-modulated.
+- **softnorm** — Churchland et al. 2012: convert to Hz, then divide each unit by `(its range + 5 Hz)`.
+  Every unit's modulation is scaled to roughly 0–1. The `+5` keeps a near-silent unit (range ~0.5 Hz)
+  from being blown up to full scale by division by something tiny. Makes the analysis about *who
+  modulates with the breath* rather than *who fires fastest*.
+
+Why it matters here: record F18 found e097's PC2 under the Bush-style PCA is almost entirely **one
+tonic unit (#89, loading 0.997)** — PC2's steps are single spikes of that unit. If one neuron owns a
+component, any rotation measured in that plane measures that neuron. Both are reported: softnorm is
+the more trustworthy measure of population geometry, sqrt keeps it comparable to the published
+analysis. Agreement across the two means the result is robust to the choice; disagreement (the
+recovery limb) is flagged, not resolved by picking one.
+
+### baseline vs native basis — the contrast that *is* the experiment
+- **Native** — fit PCA to that epoch's own bins; coordinates from how units covary during gasping itself.
+- **Baseline** — fit PCA to eupneic bins only, then project everything into those fixed axes. B24's
+  approach, and what `population_dynamics.py` already did.
+
+Why the choice can change the answer: the eupneic axes encode *who fires with whom during normal
+breathing*. ED Fig 10e reports **39% of expiratory units become inspiratory during the gasp**, so
+those axes now mix units that have swapped roles — units once anti-correlated are now correlated and
+partially cancel. Rotation depends on an orderly sequence of phase lags across units, so it cancels first.
+
+### The measures
+Each epoch is first reduced to a **phase-averaged mean cycle**: its bins sorted into 50 bins of
+respiratory phase and averaged → a 50 × 28 matrix. This puts a 0.3 s eupneic breath and a 3 s gasp
+cycle on the same footing.
+
+| measure | what it asks | ballistic | rotational |
+|---|---|---|---|
+| **λ2/λ1** | PCA the mean cycle itself; ratio of the 2nd to 1st component variance. If every unit rises and falls together the cycle is **rank 1**. A rotation needs ≥2 dimensions with a phase offset. | ≈ 0 | appreciable |
+| **RI cycle** | Enclosed area of the closed loop in its own top-2 plane (shoelace), normalised by the ellipse its covariance implies. Does the population leave one way and return another, or retrace? | 0 | 1 = circle |
+| **RI cross-val** | Split cycles odd/even, build a mean cycle from each, find the plane from **odd only**, measure the **even** cycle in it. Real consistent rotation survives; noise does not. | collapses | tracks the full estimate |
+| **var captured** | Fraction of the epoch's total variance the top 3 components of each basis account for. Same data, two coordinate systems. | — | — |
+| **cos∠** | Similarity of two *subspaces* regardless of what happens inside them: principal angles between the epoch's top-3 and baseline's top-3, via the SVD of their inner product. Mean cosine, 1 = identical, 0 = orthogonal. | — | — |
+
+The table in §7 reports **RI cycle for the native basis only**; the baseline-basis version appears in
+the figures. The cleanest quantification of the basis cost is **var captured** (0.41/0.07 vs
+0.62/0.58) and **cos∠**, not an RI contrast.
+
+### Reading the figures
+`*_basis_contrast.png` is the one built for explaining the point; `*_mean_cycle.png` is the
+all-epochs diagnostic.
+
+- **Top row — each epoch in its own coordinates.** Each panel has its own PCA, so position,
+  orientation, scale, and the sign of each axis are arbitrary. **Only the shape within a panel is
+  meaningful; panels cannot be compared to each other by position.**
+- **Bottom row — all epochs in one fixed plane**, the plane in which the eupneic cycle rotates best,
+  carried over unchanged with a common origin. Here positions, sizes and orientations **are**
+  comparable. (The all-epochs diagnostic figure re-fits a plane per panel, so its bottom row is *not*
+  comparable across panels — a limitation of that figure, fixed in the contrast figure.)
+- A **loop** means the population visits different states going out and coming back — activity sweeps
+  through units in sequence. A **flat or retraced path** means every unit rises and falls together.
+- For the baseline column the two rows are near-identical by construction — a sanity check.
+
+### The markers
+Verified empirically against the data, not assumed: **φ = 0.000 at inspiration onset** and
+**φ = 3.142 at inspiration offset**. Mean-cycle bin 0 therefore spans `[−π, −π + π/25)`, which is
+**exactly** the window B25's Methods use to define the inspiration-off point ("the mean point in the
+latent space where respiratory phase is immediately after the offset of inspiration
+[−π < φ < −π + π/25]"). Bins 0–24 are expiration, bins 25–49 inspiration.
+
+- **Red dot = the inspiration-off point**, by the paper's own definition.
+- **Open green circle = inspiration onset** (bin 25).
+- Arrow = direction of travel.
+
+### What the shared axes revealed
+In the eupneic basis the gasping cycle does **not** become a line — it **shrinks to near-nothing**
+(RI stays ~0.95; it is the amplitude that collapses, consistent with capturing only 7–41% of the
+variance). That is precisely B24's own description in ED Fig 10i: "the transition from eupnea into
+gasping is smooth and characterized by a progressive 'shrinking' of the rotational trajectories."
+**The shrinking is in large part a basis effect** — natively the loop is large. State the finding
+that way; do not claim they saw a line where we see a loop.
+
+---
+
+## 9. What this replicates in B24, and what it does not
+
+### Replicates (in e097 — a different recording, not their data)
+- **The subspace-similarity ordering of ED Fig 8.** Gasping is the least similar epoch to baseline
+  (cos∠ 0.60 / 0.21) — same direction, same relative ordering. Matches the 0.214 already in this
+  project's `pa_M`.
+- **The "shrinking" of ED Fig 10i** — clearly visible in the shared-axes bottom row.
+- **The eupneic-basis appearance of collapse** (Fig 7e–g): projecting into their coordinates
+  reproduces their observation.
+
+### Does NOT replicate, and was not tested
+- **This is not a reanalysis of their data.** e097 is a different animal and protocol; their 38
+  gasping recordings are untouched. The claim is only that *in our recording the basis choice changes
+  the answer* — which is a reason to reanalyse theirs, not a refutation of their result.
+- Single-unit findings (39% expiratory→inspiratory, "gasp only" units, tuning strength) — no
+  unit-level analysis was run.
+- The rSLDS eigenvalue result — no rSLDS was fit here.
+- **Onset-aligned** trajectories: Fig 7e is onset-aligned, this is phase-averaged. Not the same view.
+- "Pre- and post-inspiratory activity is lost" — not directly tested.
+- The correlation-structure change (Fig 7i–k) — not tested.
+- Rostral recruitment — not tested; 28 units, probe span unchecked.
+
+### New here (not in B24)
+- The **rank test** (λ2/λ1) and the **cross-validated enclosed area in the native basis** — the actual
+  new measurement, and the thing that distinguishes "rotation destroyed" from "rotation moved."
+- **Variance captured per basis**, which puts a number on the cost of a fixed basis.
+
+### Does B24 address the limitation?
+**Partly, and honestly — but it is not carried back to the interpretation.**
+
+In their favour:
+- **ED Fig 8 is the native-basis control, and they ran it**: PCA fit separately per condition,
+  principal angles between subspaces, with a shuffled lower bound.
+- They **refit the rSLDS during gasping** (n = 11), so the dynamics claim does not rest on projection
+  alone.
+- ED Fig 10i shows the transition is gradual rather than asserting a switch.
+
+Against:
+- ED Fig 8 is framed as *evidence that structure is disrupted* ("Low-dimensional structure is
+  disrupted during gasping"), not as a caveat on how Fig 7e–g should be read. The two analyses are
+  never connected.
+- Every trajectory panel carrying the "ballistic, all-or-none" claim (Fig 7e–g, ED Fig 10h, 10i) is in
+  the eupneic basis.
+- Having established that the gasping subspace is the least similar of any condition, the next step —
+  re-measuring trajectory geometry *in that native subspace* — is not taken.
+- The native-basis dynamics analysis they did run imposes d = 2 and K = 2 on the same units, so
+  "eigenvalues no longer cleanly separate" is equally consistent with model misspecification.
+
+**Fair verdict: they identified and measured the problem, then left it in the supplement framed as
+corroboration rather than as a qualification.** ED Fig 8 is arguably the strongest internal reason to
+re-read Fig 7.
+
+---
+
+## 10. Replication on the 2024 paper's own animals — it does not hold (2026-11-01)
+
+Our own sorts of **m2020-19 gates g3 and g4**, which are recordings from the 2024 paper, run through
+the same analysis. Outputs in `outputs/bush2024/gasping_native_rotation/`.
+
+**These are two gates of the SAME mouse.** With e097 that is two animals, not three.
+
+### Baseline vs gasping, softnorm / sqrt
+
+| run | units | gasps | baseline RI | **gasping RI** | gasping RI cv | var base | var native | cos∠ |
+|---|---|---|---|---|---|---|---|---|
+| e097 anoxia #1 | 28 | 20 | 0.76 / 1.04 | **1.13 / 1.10** | 1.06 / 1.08 | 0.41 / 0.07 | 0.62 / 0.58 | 0.60 / 0.21 |
+| e097 anoxia #2 | 27 | 8 | 0.41 / 0.94 | 0.98 / 1.07 | 0.11 / 1.04 | 0.31 / 0.18 | 0.70 / 0.57 | 0.35 / 0.32 |
+| **m2020-19 g3 anchor** | 30 | **32** | 1.13 / 1.05 | **0.11 / 0.05** | 0.40 / 0.36 | 0.04 / 0.08 | 0.44 / 0.49 | 0.06 / 0.28 |
+| **m2020-19 g4 anchor** | 16 | 20 | 0.87 / 0.97 | **0.11 / 0.69** | 0.59 / 0.76 | 0.56 / 0.05 | 0.67 / 0.57 | 0.65 / 0.09 |
+
+### 1. The native-rotation result does NOT replicate
+
+In three of four anchor measurements the gasping cycle has RI **0.05–0.11** — essentially a retraced
+line — against e097's 1.10–1.13. Meanwhile **baseline rotates cleanly in both gates** (0.87–1.13),
+so the positive control passes and the measure is working.
+
+This is not a power problem: **g3 has 32 gasps, more than e097's 20.** And g3's protocol is the
+close match to e097 (room air → N2, no hypercapnia before the first challenge), so a protocol
+difference does not explain it either.
+
+**So in the paper's own animal, the native-basis test supports B24's ballistic conclusion.** The
+claim that "ballistic" is a basis artifact is not supported. e097 anoxia #1 is one recording out of
+four, and it is the outlier.
+
+### 2. What does replicate: the basis is lossy
+
+In 7 of 8 measurements the baseline basis captures far less of gasping's variance than a native
+basis (0.04–0.56 vs 0.44–0.70). The projection genuinely loses most of the gasping signal — ED
+Fig 8's point is real. But **losing variance is not the same as destroying rotation**, and the two
+must now be stated separately.
+
+### 3. Gasping is not uniquely rotated away
+
+Recovery epochs are often as far from baseline as gasping is: g3 sqrt has recovery 2 at 0.14 against
+gasping 0.28; g4 softnorm has early recovery at 0.28 against gasping 0.65. In 3 of 7 anchor
+measurements gasping is *not* the lowest-cos∠ epoch. The subspace moves and tends not to come back,
+rather than gasping being a special excursion.
+
+### 4. Sorting stability dominates these measures — the biggest caveat of all
+
+m2020-19 has gasping-induced tissue movement (45–110 µm steps after gasping) that splits units. The
+uncorrected sorts against the anchor sorts:
+
+| | g3 uncorrected | g3 anchor | g4 uncorrected | g4 anchor |
+|---|---|---|---|---|
+| gasping RI (softnorm) | **1.02** | **0.11** | 0.26 | 0.11 |
+| early recovery cos∠ | 0.00 / 0.01 | 0.34 / 0.40 | 0.01 / 0.01 | 0.28 / 0.25 |
+| late/2nd recovery cos∠ | 0.00 / 0.00 | 0.42 / 0.14 | 0.00 / 0.01 | 0.32 / 0.49 |
+| var captured, post-gasp | 0.00–0.01 | 0.13–0.37 | 0.00 | 0.18–0.32 |
+
+Two things follow:
+
+- With uncorrected sorting, **every post-gasp epoch is essentially orthogonal to baseline and
+  captures ~0% of its variance** — the baseline units stop existing as the same clusters after the
+  move. A drift artifact manufactures exactly the signature we were testing for.
+- Drift-induced splitting also **inflates apparent gasping rotation ~10×** in g3 (RI 1.02
+  uncorrected vs 0.11 anchor).
+
+e097 is drift-free (median shift −0.8 µm across the gasping transition), so its result is **not**
+this artifact. But any subspace or correlation-structure claim measured across gasping is highly
+sensitive to sorting stability — **and that includes B24's ED Fig 8 and the Fig 7i–k correlation
+result.** The paper's KS3 sort was drift-corrected (datashift2) and its g3 units largely track under
+our anchor correction (54/63), so it is far from the uncorrected worst case; but the sensitivity is
+real and is probably the most useful thing to come out of this exercise.
+
+### Revised position
+
+- **Dropped:** "B24's ballistic result is substantially a basis artifact." One of four recordings
+  supports it; the paper's own animal contradicts it.
+- **Kept:** the eupneic basis is genuinely lossy for gasping, and ED Fig 8 already said so.
+- **New and solid:** subspace measures across gasping are dominated by sorting stability, which
+  neither paper addresses.
+- **Open:** why e097 anoxia #1 differs. Between-animal variability, unit count (16–30 units is thin
+  for this), or something about that preparation. Worth understanding before any of it is claimed.
