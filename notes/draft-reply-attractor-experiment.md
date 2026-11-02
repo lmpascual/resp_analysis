@@ -21,12 +21,20 @@ rather than to baseline, and ask whether the cycle is rank-one (every unit risin
 together, which is what ballistic means geometrically) or whether it encloses area.
 
 In our own anoxia recording the basis looked like it mattered a great deal — the gasping cycle came
-out rotational in its own coordinates, more so than eupnea. But when I ran the same analysis on our
-sorts of m2020-19 g3 and g4, the gasping cycle is a retraced line in its own basis: rotation index
-0.05–0.11, against 0.87–1.13 for baseline in the same recordings. g3 has 32 gasps, more than our 20,
-and its protocol is the close match to ours. **So the native-basis test doesn't rescue the rotation
-in your animal — it reproduces your result.** I think our recording is the outlier and I wouldn't
-lean on it.
+out rotational in its own coordinates, more so than eupnea. But on our sorts of m2020-19 g3 and g4
+it doesn't hold in the same way, and the honest picture is a gradient rather than a clean result.
+Measuring the rotation on gasps held out from the ones used to pick units, I get about 1.0 in our
+recording, 0.7 in g4 and 0.4 in g3, where 1 is a circle and 0 a retraced line. So the effect is
+real where we see it and weak to absent elsewhere, and I wouldn't claim from this that the ballistic
+description is wrong.
+
+One thing I got wrong on the way is worth passing on. Putting every recorded unit into the
+decomposition dilutes a cycle measure badly — in g4 the gasping rotation reads 0.11 with all
+sixteen units and 1.04 restricted to the nine that are actually respiratory-modulated. That is fine
+for a variance decomposition but it does matter if the question is whether a cycle exists. Mean
+modulation during gasping is 0.56 in our recording against 0.33 and 0.09 in the two gates, so how
+much of this is biology and how much is how many modulated units each recording happens to hold is
+not something I can separate yet.
 
 What does hold up is narrower: in those gates the eupneic basis captures 4–8% of gasping's variance
 against 44–49% natively. The projection genuinely loses most of the gasping signal, which is what ED

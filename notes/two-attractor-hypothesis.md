@@ -522,3 +522,101 @@ real and is probably the most useful thing to come out of this exercise.
   neither paper addresses.
 - **Open:** why e097 anoxia #1 differs. Between-animal variability, unit count (16–30 units is thin
   for this), or something about that preparation. Worth understanding before any of it is claimed.
+
+> ⚠️ **Partly revised by §11.** Chasing the difference showed that **including units with little
+> respiratory modulation dilutes the cycle measure**. Once that is corrected, g4 does show a gasping
+> rotation. The contradiction is graded, not binary: e097 > g4 > g3. "m2020-19 contradicts e097" is
+> too strong as stated above.
+
+---
+
+## 11. Chasing the e097 difference (2026-11-01)
+
+Five explanations tested against what is on disk. Code:
+`analysis/population/gasping_rotation_controls.py` in the sorting_v2 repo, one `--test` per control;
+every number below reproduces from it.
+
+### Ruled out
+
+**Unit count / statistical power.** Subsampling e097's 28 units down to g4's 16, 200 draws:
+median gasping RI **1.09**, IQR [1.00, 1.13], 5–95% [0.17, 1.18], only 8% of draws below 0.3. At
+n = 20 and 24 it is tighter still. Drop-one jackknife moves RI only within 1.04–1.19. **So
+m2020-19's lower unit counts cannot explain its RI of 0.05–0.11.**
+
+**Rostral / gasp-recruited units carrying the rotation.** Within e097:
+
+| subset | n | gasping RI |
+|---|---|---|
+| all units | 28 | 1.13 |
+| shallow half (<1700 µm, near probe tip) | 14 | 1.17 |
+| deep half (≥1700 µm) | 14 | 1.01 |
+| **drop gasp-recruited (FR ratio ≥ 1.5)** | 25 | **1.20** |
+
+Dropping the recruited units *raises* RI, and both ends of the probe rotate. And by B24's ED Fig 10g
+categories **g3 has more gasp-recruited units than e097** (5 "gasp only" + 4 "gasp increasing" = 9,
+against e097's 3 + 0). Probe depth coverage is also comparable (e097 9–2722 µm, g3 203–3280, g4
+68–3419). **The rostral-recruitment account is not supported as the carrier of the rotation** —
+though it says nothing about what those units do otherwise.
+
+### Refuted
+
+**Phase-shift coherence.** The idea was that e097's population shifts phase coherently (preserving
+an orderly ordering) while m2020-19 scrambles. The resultant length of per-unit baseline→gasping
+phase shifts is the opposite: **e097 0.21, g3 anchor 0.41, g4 anchor 0.32.** e097 has the *least*
+coherent shift and rotates most.
+
+**Phase bunching.** If every unit became co-active at the gasp the cycle would be rank-1. Circular
+concentration of preferred phases during gasping is similar everywhere — e097 0.30, g3 0.27, g4 0.23
+— so no recording bunches more than another. Weighting each unit by its modulation depth (so tonic
+units stop counting as evidence of tiling) does not separate them either: 0.51, 0.46, 0.52.
+
+### Partly supported, and the most useful finding
+
+**Respiratory modulation depth, and which units are included.** Mean `modulation_L` during gasping:
+**e097 0.56, g4 0.33, g3 0.09** — g3's average unit is below the pipeline's 0.2 tonic threshold.
+Restricting to modulated units:
+
+| run | all units | best-modulated half | phasic (L ≥ 0.2) | strongly phasic (L ≥ 0.4) |
+|---|---|---|---|---|
+| e097 | 1.13 | 1.12 (n=13) | 1.12 (n=17) | 1.12 (n=15) |
+| **g4** | **0.11** | 0.55 (n=8) | **1.04 (n=9)** | **1.63 (n=4)** |
+| g3 | 0.11 | 0.02 (n=15) | — (only n=3) | — (n=2) |
+
+**Cross-validated** — units selected on odd gasps, rotation measured on even gasps, so the selection
+cannot manufacture the result:
+
+| run | n selected | RI (even, selected) | RI (even, all units) |
+|---|---|---|---|
+| e097 anoxia #1 | 15 | **1.04** | 1.10 |
+| g4 anchor | 7 | **0.70** | 0.25 |
+| g3 anchor | 16 | 0.38 | 0.29 |
+
+### What this means
+
+- **Part of the failed replication was my own analysis choice.** Including units with little
+  respiratory modulation dilutes the mean cycle. B24 and B25 both put *all* recorded units into the
+  PCA, which is defensible for a variance decomposition but costly for a cycle measure.
+- **The contradiction is graded, not binary:** e097 (1.04) > g4 (0.70) > g3 (0.38) cross-validated.
+  g4 does show a gasping rotation once unmodulated units are excluded.
+- **g3 stays low even after selection** and has very few modulated units during gasping, so it is
+  closer to "cannot be assessed" than to "shown to be ballistic."
+- **Caveat:** the pipeline's `modulation_L` (occupancy-corrected) and the resultant length
+  recomputed here from the mean cycle do not agree on unit counts — 3 vs 16 phasic units in g3. The
+  cross-validated table uses one consistent measure throughout; the per-pipeline counts should not
+  be mixed with it.
+
+### Still unexplained, and the leading remaining candidates
+- **Inspired O2.** e097's baseline is room air; the B24 protocol supplies 100% O2. That changes the
+  desaturation trajectory and so possibly the gasping state itself. It cannot affect the *native*
+  gasping measure directly (which never touches the baseline basis), but it can change what gasping
+  is. **Untested.**
+- **Sorting quality.** Residual unit-identity error during gasping scrambles phase relationships and
+  would lower measured rotation. e097's sorting is manually checked with minimal drift; confidence
+  in m2020-19 is lower even anchored. **Untested as the cause, and not separable from the above with
+  these data** — but demonstrably the right family of worry: anchoring raises phase-shift coherence
+  from **0.13 → 0.41** in g3 and **0.19 → 0.32** in g4, so a sorting correction alone moves this
+  class of measure threefold. Coherence itself is not the mediator (anchored g3 is *more* coherent
+  than e097 and still does not rotate); the point is only that these quantities track the sort.
+
+Both predict the observed gradient. Distinguishing them needs either a room-air B24-animal recording
+or a sorting-quality manipulation (e.g. degrade e097's sort and watch RI fall).
