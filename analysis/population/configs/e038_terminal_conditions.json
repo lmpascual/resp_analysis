@@ -1,0 +1,19 @@
+{
+ "recording": "e038_g0 window terminal (run time, imec clock; sort config sorting/configs/e038_terminal.yaml)",
+ "source": "experiment log e038.docx (mm:ss = run s) and the diaphragm (cibrrig breaths, Bush-rule gasps), 2026-10-29",
+ "conditions": [
+  {
+   "name": "baseline",
+   "start_raw_s": 8147.0,
+   "end_raw_s": 8457.0,
+   "source": "stable breathing before the terminal gasping (log 2:18 'seems stable')",
+   "colour": "#6a6a66"
+  },
+  {
+   "name": "gasping",
+   "rule": "gasp_flag",
+   "source": "terminal gasping 8465-8603 to death",
+   "colour": "#d93636"
+  }
+ ]
+}

@@ -93,6 +93,7 @@ nidq:
   flow_channel: null     # airflow / plethysmography
   ecg_channel: null
   file_start_s: 0.0      # run time of input.folder's first sample: CatGT -startsecs for an extract, 0 for a whole run
+  sync_map: null         # JSON from analysis/session/nidq_sync.py: read the NIDQ on the imec clock (runs of hours)
 
 comparison:
   enabled: true

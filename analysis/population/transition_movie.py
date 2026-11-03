@@ -5,9 +5,14 @@ An epoch is drawn as its 5 ms bins (faint, coloured by Viterbi state) and its me
 phase bins, in the epoch's colour, ◆ = inspiration onset); the baseline loop stays as a grey dashed reference. A strip
 along the bottom marks the epoch on screen. PCA: the runs' own (Bush & Ramirez), with equal units on all three axes.
 
-  cibrrig python transition_movie.py [--run <population_dynamics run>] [--elev 22 --azim -62]
+By default PC1 and PC3 lie on the floor and PC2 is the height (--pcs 1,3,2): the breathing loop rotates in PC1-PC3,
+and PC2 (unit 89 alone, analysis record F18) only moves between epochs, so the loop's plane sinks and rises. With PC3
+up (--pcs 1,2,3) the flat loop reads as lying on the PC1-PC2 floor, and PC2 shifts are foreshortened into the depth.
 
-Writes <run>/transitions/movie/: <trial>_transitions.gif and <trial>_epochs.png (every epoch at the movie's view).
+  cibrrig python transition_movie.py [--run <population_dynamics run>] [--pcs 1,3,2] [--elev 35 --azim -45]
+
+Writes <run>/transitions/movie/: <trial>_transitions.gif and <trial>_epochs.png (every epoch at the movie's view),
+with _PC3-up in the names for --pcs 1,2,3.
 """
 from __future__ import annotations
 
@@ -34,27 +39,35 @@ from matplotlib.patches import Rectangle  # noqa: E402
 
 FPS = 15
 FIRST_S, FADE_S, HOLD_S = 1.5, 1.6, 1.2    # first epoch alone, then per transition: cross-fade, next epoch alone
-ELEV, AZIM = 22, -62                        # degrees; PC1 runs left to right, PC2 recedes, PC3 up
+VIEWS = {(1, 3, 2): (35, -45, 1.0),         # elevation, azimuth (degrees), 3D zoom for each axis order (x, y, z PCs)
+         (1, 2, 3): (22, -62, 1.2)}
 N_DRAWN = 2500                              # 5 ms bins drawn per epoch (random, seed 0)
 DOT_ALPHA = 0.35
 CYCLE_BINS = 50
 BG = "#fcfcfb"
-AXES = ["PC1", "PC2", "PC3"]
 
 
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     p.add_argument("--run", default=str(tw.RUN), help="population_dynamics.py output folder (anoxia #1 by default)")
-    p.add_argument("--elev", type=float, default=ELEV)
-    p.add_argument("--azim", type=float, default=AZIM)
-    return p.parse_args()
+    p.add_argument("--pcs", default="1,3,2", help="the PCs on the x, y and z (vertical) axes")
+    p.add_argument("--elev", type=float, help="default: VIEWS for the axis order")
+    p.add_argument("--azim", type=float, help="default: VIEWS for the axis order")
+    a = p.parse_args()
+    a.pcs = tuple(int(x) for x in a.pcs.split(","))
+    assert sorted(a.pcs) == [1, 2, 3], "--pcs takes an order of 1, 2 and 3"
+    view = VIEWS.get(a.pcs, VIEWS[(1, 3, 2)])
+    a.elev = view[0] if a.elev is None else a.elev
+    a.azim = view[1] if a.azim is None else a.azim
+    a.zoom = view[2]
+    return a
 
 
-def epochs(c, rng):
+def epochs(c, rng, pcs):
     k = c["ref_k"]
     cond = tw.label_transitions(c["cond"])[0]
     bcond = tw.bin_conditions(c, cond)
-    P, seq, off = c["P"][:, :3], c["F"][k]["seq"], c["time_offset_s"]
+    P, seq, off = c["P"][:, [p - 1 for p in pcs]], c["F"][k]["seq"], c["time_offset_s"]     # x, y, z
     ons = c["dia_df"]["on_sec"].to_numpy()
     colours = {**c["cond_colours"], **tw.TRANSITION_COLOURS}
     out = []
@@ -75,16 +88,16 @@ def smooth(x):
     return x * x * (3 - 2 * x)
 
 
-def render(c, E, path, sheet_path, trial, elev, azim):
-    lims = [tw.PC_LIMITS[d] for d in range(3)]
+def render(c, E, path, sheet_path, trial, pcs, elev, azim, zoom):
+    lims = [tw.PC_LIMITS[p - 1] for p in pcs]
     fig = plt.figure(figsize=(9.6, 7.4), dpi=90, facecolor=BG)
-    ax = fig.add_axes((0.0, 0.08, 1.0, 0.8), projection="3d")
+    ax = fig.add_axes((0.0, 0.13, 1.0, 0.77), projection="3d")
     ax.set_facecolor(BG)
-    ax.set_box_aspect([l[1] - l[0] for l in lims], zoom=1.2)
+    ax.set_box_aspect([l[1] - l[0] for l in lims], zoom=zoom)
     for d, axis in enumerate((ax.xaxis, ax.yaxis, ax.zaxis)):
         axis.set_pane_color((1, 1, 1, 0))
         axis._axinfo["grid"].update(color=GRID, linewidth=0.5)
-        axis.set_label_text(AXES[d], color=INK2)
+        axis.set_label_text(f"PC{pcs[d]}", color=INK2)
         axis.set_tick_params(labelsize=7, colors=INK2)
     ax.set_xlim(*lims[0])
     ax.set_ylim(*lims[1])
@@ -169,12 +182,14 @@ def main():
     run = Path(a.run)
     c = tw.load_context(run)
     trial = c.get("trial", "anoxia #1")
-    E = epochs(c, np.random.default_rng(0))
+    E = epochs(c, np.random.default_rng(0), a.pcs)
     out = run / "transitions" / "movie"
     out.mkdir(parents=True, exist_ok=True)
     tag = trial.replace(" #", "").replace(" ", "_")
-    render(c, E, out / f"{tag}_transitions.gif", out / f"{tag}_epochs.png", trial, a.elev, a.azim)
-    print(out / f"{tag}_transitions.gif")
+    up = "" if a.pcs == (1, 3, 2) else f"_PC{a.pcs[2]}-up"
+    render(c, E, out / f"{tag}_transitions{up}.gif", out / f"{tag}_epochs{up}.png", trial, a.pcs, a.elev, a.azim,
+           a.zoom)
+    print(out / f"{tag}_transitions{up}.gif")
 
 
 if __name__ == "__main__":

@@ -712,21 +712,34 @@ def write_features(c):
 
 
 def make_all(c):
+    """As figures_population.make_all: a figure that fails is logged in c['skipped'] and the others still get made."""
+    import logging
+    import traceback
+    log = logging.getLogger("population_dynamics")
+    c.setdefault("skipped", [])
+
+    def run(f, *args):
+        try:
+            f(c, *args)
+        except Exception as e:  # noqa: BLE001
+            plt.close("all")
+            c["skipped"].append(f"{f.__name__}{args}: {type(e).__name__}: {e}")
+            log.warning("figure %s%s skipped: %s\n%s", f.__name__, args, e, traceback.format_exc(limit=3))
     c["sig_out"] = c["out"] / "signatures"
     c["unit_out"] = c["out"] / "units"
     c["sig_out"].mkdir(exist_ok=True)
     c["unit_out"].mkdir(exist_ok=True)
-    fig_fingerprints(c)
+    run(fig_fingerprints)
     for k in c["ks"]:
-        fig_state_progression(c, k)
+        run(fig_state_progression, k)
     for align in ("on", "off"):
-        fig_population_peth(c, align)
-    fig_polar(c)
+        run(fig_population_peth, align)
+    run(fig_polar)
     c["slide_out"] = c["out"] / "units_slides"
     c["slide_out"].mkdir(exist_ok=True)
     for u in c["order_units"]:
-        unit_state_card(c, u)
-        unit_slide_raster(c, u)
-        unit_slide_peth(c, u)
-    write_slide_manifest(c)
-    write_features(c)
+        run(unit_state_card, u)
+        run(unit_slide_raster, u)
+        run(unit_slide_peth, u)
+    run(write_slide_manifest)
+    run(write_features)

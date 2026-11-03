@@ -1,0 +1,40 @@
+{
+ "recording": "e038_g0 window post_trial (run time, imec clock; sort config sorting/configs/e038_post_trial.yaml)",
+ "source": "experiment log e038.docx (mm:ss = run s) and the diaphragm (cibrrig breaths, Bush-rule gasps), 2026-10-29",
+ "conditions": [
+  {
+   "name": "baseline",
+   "start_raw_s": 5850.0,
+   "end_raw_s": 5950.0,
+   "source": "post-trial period asked (5850-5950), after the laser; the reference for PCA here",
+   "colour": "#6a6a66"
+  },
+  {
+   "name": "pre-episode",
+   "start_raw_s": 6012.0,
+   "end_raw_s": 6072.0,
+   "source": "60 s before the 6076 episode",
+   "colour": "#a77bd6"
+  },
+  {
+   "name": "gasping",
+   "rule": "gasp_flag",
+   "source": "spontaneous episodes 6076 and 6187 (Bush rule)",
+   "colour": "#d93636"
+  },
+  {
+   "name": "between",
+   "start_raw_s": 6090.0,
+   "end_raw_s": 6183.0,
+   "source": "between the two episodes",
+   "colour": "#77c06a"
+  },
+  {
+   "name": "after",
+   "start_raw_s": 6210.0,
+   "end_raw_s": 6270.0,
+   "source": "after the 6187 episode",
+   "colour": "#1c9157"
+  }
+ ]
+}

@@ -116,7 +116,8 @@ def fig_overview(c):
     d = c["dia_df"]
     rate = 60 / d["ibi_s"]
     axes[1].plot(d["on_sec"] + off, rate, ".", ms=2, color=INK2)
-    axes[1].plot(d.loc[d["gasp"], "on_sec"] + off, rate[d["gasp"]], ".", ms=4, color=c["cond_colours"]["gasping"],
+    axes[1].plot(d.loc[d["gasp"], "on_sec"] + off, rate[d["gasp"]], ".", ms=4,
+                 color=c["cond_colours"].get("gasping", "#d93636"),
                  label="gasp (Bush 2024 rule)")
     axes[1].set_ylabel("breaths/min")
     axes[1].legend(loc="upper right", frameon=False, fontsize=7)
@@ -378,7 +379,7 @@ def fig_phase_tuning(c):
     conds = [n for n in c["conditions"] if n in c["curves"]]
     rows = unit_rows(c)
     fig = plt.figure(figsize=(17, 9))
-    gs = fig.add_gridspec(2, len(conds), height_ratios=[2.2, 1.3])
+    gs = fig.add_gridspec(2, max(len(conds), 5), height_ratios=[2.2, 1.3])   # the bottom row needs 5 columns
     for j, name in enumerate(conds):
         ax = fig.add_subplot(gs[0, j])
         R = c["curves"][name][:, rows].T
@@ -424,13 +425,14 @@ def fig_phase_tuning(c):
     ax = fig.add_subplot(gs[1, 4])
     pp = tu.pivot(index="unit_id", columns="condition", values="preferred_phase")
     ll = tu.pivot(index="unit_id", columns="condition", values="modulation_L")
-    ok = (ll["baseline"] >= 0.2) & (ll["gasping"] >= 0.2)
-    ax.scatter(pp.loc[ok, "baseline"], pp.loc[ok, "gasping"], color=INK, s=14)
+    other = "gasping" if "gasping" in ll else conds[-1]          # windows without gasping: baseline vs the last
+    ok = (ll["baseline"] >= 0.2) & (ll[other] >= 0.2)
+    ax.scatter(pp.loc[ok, "baseline"], pp.loc[ok, other], color=INK, s=14)
     ax.plot([-np.pi, np.pi], [-np.pi, np.pi], color=GRID, lw=0.8)
     phase_axis(ax, label=False)
     ax.set_ylim(-np.pi, np.pi)
     ax.set_xlabel("preferred φ, baseline")
-    ax.set_ylabel("preferred φ, gasping")
+    ax.set_ylabel(f"preferred φ, {other}")
     ax.set_title(f"units modulated in both (n={int(ok.sum())})", fontsize=8)
     fig.suptitle("Phase tuning per condition (cibrrig get_phase_curve; rows scaled 0-1 per unit and condition; "
                  "units ordered by baseline preferred φ, tonic last)", x=0.01, ha="left")
@@ -892,8 +894,19 @@ def fig_breathing_epochs(c):
 
 
 def make_all(c):
+    """Every figure; one that fails (e.g. a gasping figure in a window without gasps) is logged and skipped so the
+    rest, including the per-unit rasters and PETHs, still get drawn. Skipped figures are listed in c['skipped']."""
+    import logging
+    import traceback
+    log = logging.getLogger("population_dynamics")
+    c.setdefault("skipped", [])
     for f in (fig_overview, fig_zoom, fig_hmm_models, fig_lineage, fig_phase_tuning, fig_pca, fig_gasping,
               fig_hmm_vs_pca, fig_breath_rasters, write_breath_raster_viewer, fig_breathing_epochs):
-        f(c)
+        try:
+            f(c)
+        except Exception as e:  # noqa: BLE001
+            plt.close("all")
+            c["skipped"].append(f"{f.__name__}: {type(e).__name__}: {e}")
+            log.warning("figure %s skipped: %s\n%s", f.__name__, e, traceback.format_exc(limit=3))
     import figures_signatures
     figures_signatures.make_all(c)

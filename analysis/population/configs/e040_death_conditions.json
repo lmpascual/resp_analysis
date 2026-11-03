@@ -1,0 +1,26 @@
+{
+ "recording": "e040_g0 window death (run time, imec clock; sort config sorting/configs/e040_death.yaml)",
+ "source": "experiment log e040.docx (mm:ss = run s) and the diaphragm (cibrrig breaths, Bush-rule gasps), 2026-10-29",
+ "conditions": [
+  {
+   "name": "baseline",
+   "start_raw_s": 9760.0,
+   "end_raw_s": 9990.0,
+   "source": "tonic activity and sighs before anoxia #4",
+   "colour": "#6a6a66"
+  },
+  {
+   "name": "anoxia",
+   "start_raw_s": 9990.0,
+   "end_raw_s": 10004.0,
+   "source": "logged anoxia #4 (2:46:30) until the first gasp",
+   "colour": "#f2918a"
+  },
+  {
+   "name": "gasping",
+   "rule": "gasp_flag",
+   "source": "gasps 10005-10036 and 10075-10179, death",
+   "colour": "#d93636"
+  }
+ ]
+}

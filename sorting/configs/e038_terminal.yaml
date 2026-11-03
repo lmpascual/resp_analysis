@@ -1,0 +1,61 @@
+# e038 (Grp-cre homozygous = Grp KO, bilateral NTS hM4Di + ChRmine; female; urethane; 40% O2), 2025-10-22.
+# Run e038_g0 (8627.5 s), Neuropixels 1.0 (PRB_1_4_0480_1_C) in the left VRC. NIDQ: XA0 diaphragm EMG, XA4 ECG,
+# XD0 bit 0 the 1 Hz sync, bit 1 the laser; no airflow, no gas channel. Log: <grp_data>/e038.docx (mm:ss = run s).
+# Events (run s, checked against the diaphragm 2026-10-29): probe insertion until ~3250 | anoxia #1 4860-4872, gasps
+# 4879-4890 | anoxia #2 5340-5355, gasps 5361-5373 | spontaneous gasping 5467 (4 gasps), 5644, 6076, 6187, 6572,
+# 6672, 6873, 6994 | laser 5694-5787 (no effect) | CNO ~6960 | terminal gasping 8465-8603, death.
+#
+# Window terminal: run 8147-8627 s (480 s): stable breathing before the end, terminal gasping (8465-8603) and death.
+# Short windows (<= 8 min, like e097's 420 / 360 s), as the user asked (2026-10-29): a long sort loses brief gasping
+# units and spans tissue moves. Comparisons across windows use units matched between sorts.
+# Input: CatGT extract of this window, made as e097's:
+#   CatGT -dir=<grp_data> -run=e038 -g=0 -t=0 -prb_fld -ap -prb=0 -startsecs=8147 -maxsecs=480
+#         -apfilter=butter,12,300,9000 -loccar_um=75,300 -dest=<catgt>/catgt_e038_terminal
+# Spike times are seconds from run 8147 s (imec clock); the NIDQ is read on the imec clock (nidq.sync_map).
+
+experiment_name: e038_terminal_480s
+
+paths:
+  output_dir: ${outputs}/grp/e038/terminal
+  scratch_dir: ${scratch}/grp_e038_terminal   # ~11 GB preprocessed binary + sorter folder
+
+input:
+  source: catgt
+  folder: ${catgt}/catgt_e038_terminal/catgt_e038_g0
+  stream_id: imec0.ap
+
+motion:
+  # Off, as for e097 (D2): the spike bands are flat through this window in the drift check (peak depths 1 s every
+  # 10 s over the run, 2026-10-29; outputs/grp/e038/drift_check_2026-10-29).
+  enabled: false
+
+sorters:
+  kilosort4:
+    enabled: true
+    params:
+      torch_device: cuda
+      do_correction: false
+  lupin:
+    enabled: false   # as m2020-19: the analyses use Kilosort 4 units; halves the run time
+
+job_kwargs:
+  n_jobs: 12
+
+# File time (run time - 8147 s), for the waveform-stability check.
+epochs:
+  - {name: late, start_s: 0, end_s: 310}   # run 8147-8457 s
+  - {name: terminal, start_s: 318, end_s: 456}   # run 8465-8603 s
+
+nidq:
+  bin: ${grp_data}/e038_g0/e038_g0_t0.nidq.bin
+  n_channels: 7          # XA0-XA5 + one digital word
+  emg_channel: 0
+  flow_channel: 5        # no airflow recorded; XA5 is a flat ~1.1 V line, kept only because the code reads a flow channel
+  ecg_channel: 4
+  file_start_s: 8147   # CatGT -startsecs
+  sync_map: ${outputs}/grp/e038/nidq_sync_map.json
+
+curation:
+  threshold_overrides:
+    mua:
+      presence_ratio: null   # as e097 (D4): units fall silent during gasping

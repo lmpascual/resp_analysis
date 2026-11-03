@@ -1,0 +1,20 @@
+{
+ "recording": "e040_g0 window cno (run time, imec clock; sort config sorting/configs/e040_cno.yaml)",
+ "source": "experiment log e040.docx (mm:ss = run s) and the diaphragm (cibrrig breaths, Bush-rule gasps), 2026-10-29",
+ "conditions": [
+  {
+   "name": "baseline",
+   "start_raw_s": 7020.0,
+   "end_raw_s": 7260.0,
+   "source": "later recovery before CNO (log 2:01:00)",
+   "colour": "#6a6a66"
+  },
+  {
+   "name": "after CNO",
+   "start_raw_s": 7290.0,
+   "end_raw_s": 7500.0,
+   "source": "after the CNO injection: tonic diaphragm activity stops",
+   "colour": "#2a78d6"
+  }
+ ]
+}

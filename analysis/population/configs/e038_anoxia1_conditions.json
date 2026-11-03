@@ -1,0 +1,33 @@
+{
+ "recording": "e038_g0 window anoxia1 (run time, imec clock; sort config sorting/configs/e038_anoxia1.yaml)",
+ "source": "experiment log e038.docx (mm:ss = run s) and the diaphragm (cibrrig breaths, Bush-rule gasps), 2026-10-29",
+ "conditions": [
+  {
+   "name": "baseline",
+   "start_raw_s": 4800.0,
+   "end_raw_s": 4860.0,
+   "source": "60 s before anoxia #1 (log 1:21:00), as e097",
+   "colour": "#6a6a66"
+  },
+  {
+   "name": "anoxia",
+   "start_raw_s": 4860.0,
+   "end_raw_s": 4879.0,
+   "source": "logged anoxia #1 4860-4872 until the first gasp",
+   "colour": "#f2918a"
+  },
+  {
+   "name": "gasping",
+   "rule": "gasp_flag",
+   "source": "Bush & Ramirez 2024: 7-breath median IBI > 1 s until < 0.85 s",
+   "colour": "#d93636"
+  },
+  {
+   "name": "recovery",
+   "start_raw_s": 4895.0,
+   "end_raw_s": 5280.0,
+   "source": "after the last gasp to the window end",
+   "colour": "#77c06a"
+  }
+ ]
+}

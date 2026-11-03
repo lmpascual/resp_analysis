@@ -1,0 +1,13 @@
+{
+ "recording": "e038_g0 window baseline (run time, imec clock; sort config sorting/configs/e038_baseline.yaml)",
+ "source": "experiment log e038.docx (mm:ss = run s) and the diaphragm (cibrrig breaths, Bush-rule gasps), 2026-10-29",
+ "conditions": [
+  {
+   "name": "baseline",
+   "start_raw_s": 4020.0,
+   "end_raw_s": 4500.0,
+   "source": "pre-trial baseline (4000-4500 asked)",
+   "colour": "#6a6a66"
+  }
+ ]
+}
