@@ -59,6 +59,14 @@ epochs:
   - {name: slow_breathing, start_s: 175, end_s: 290}
   - {name: late_recovery, start_s: 295, end_s: 359}
 
+# NIDQ of run e097_g2 (read by analysis/population): XA0 diaphragm EMG, XA2 ECG, XA5 airflow.
+nidq:
+  bin: ${raw_data}/e097_g2/e097_g2_t0.nidq.bin
+  emg_channel: 0
+  flow_channel: 5
+  ecg_channel: 2
+  file_start_s: 2250.0     # CatGT -startsecs of this extract
+
 curation:
   threshold_overrides:
     mua:

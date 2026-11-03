@@ -1,0 +1,71 @@
+# e038 (Grp-cre homozygous = Grp KO, bilateral NTS hM4Di + ChRmine; female; urethane; 40% O2), 2025-10-22.
+# Run e038_g0 (8627.5 s), Neuropixels 1.0 (PRB_1_4_0480_1_C) in the left VRC. NIDQ: XA0 diaphragm EMG, XA4 ECG,
+# XD0 bit 0 the 1 Hz sync, bit 1 the laser; no airflow, no gas channel. Log: <grp_data>/e038.docx (mm:ss = run s).
+# Events (run s, checked against the diaphragm 2026-10-29): probe insertion until ~3250 | anoxia #1 4860-4872, gasps
+# 4879-4890 | anoxia #2 5340-5355, gasps 5361-5373 | spontaneous gasping 5467 (4 gasps), 5644, 6076, 6187, 6572,
+# 6672, 6873, 6994 | laser 5694-5787 (no effect) | CNO ~6960 | terminal gasping 8465-8603, death.
+#
+# Window post_trial: run 5790-6270 s (480 s): the post-trial period (5850-5950) after the laser, then spontaneous episodes at 6076 and 6187.
+# Short windows (<= 8 min, like e097's 420 / 360 s), as the user asked (2026-10-29): a long sort loses brief gasping
+# units and spans tissue moves. Comparisons across windows use units matched between sorts.
+# Input: CatGT extract of this window, made as e097's:
+#   CatGT -dir=<grp_data> -run=e038 -g=0 -t=0 -prb_fld -ap -prb=0 -startsecs=5790 -maxsecs=480
+#         -apfilter=butter,12,300,9000 -loccar_um=75,300 -dest=<catgt>/catgt_e038_post_trial
+# Spike times are seconds from run 5790 s (imec clock); the NIDQ is read on the imec clock (nidq.sync_map).
+
+experiment_name: e038_post_trial_480s
+
+paths:
+  output_dir: ${outputs}/grp/e038/post_trial
+  scratch_dir: ${scratch}/grp_e038_post_trial   # ~11 GB preprocessed binary + sorter folder
+
+input:
+  source: catgt
+  folder: ${catgt}/catgt_e038_post_trial/catgt_e038_g0
+  stream_id: imec0.ap
+
+motion:
+  # On: in the drift check (peak depths 1 s every 10 s over the run, 2026-10-29; outputs/grp/e038/drift_check_2026-10-29)
+  # the tissue steps with each gasping bout (20-30 um mid-probe, up to ~50 um bends in the episodes; nonrigid, the tip
+  # barely moves). DREDGE nonrigid with the gasp seconds bridged, as in m2020-19's rigid trial; checked with
+  # sorting/motion_check.py before sorting.
+  enabled: true
+  preset: dredge
+  estimate_motion_kwargs:
+    max_disp_um: 150
+  bridge_s: [[282, 300], [393, 418]]   # Bush-rule gasping +-4 s, file time
+
+sorters:
+  kilosort4:
+    enabled: true
+    params:
+      torch_device: cuda
+      do_correction: false
+  lupin:
+    enabled: false   # as m2020-19: the analyses use Kilosort 4 units; halves the run time
+
+job_kwargs:
+  n_jobs: 12
+
+# File time (run time - 5790 s), for the waveform-stability check.
+epochs:
+  - {name: post_trial, start_s: 60, end_s: 160}   # run 5850-5950 s
+  - {name: pre_episode, start_s: 200, end_s: 282}   # run 5990-6072 s
+  - {name: episode_1, start_s: 285, end_s: 297}   # run 6075-6087 s
+  - {name: between, start_s: 300, end_s: 393}   # run 6090-6183 s
+  - {name: episode_2, start_s: 397, end_s: 415}   # run 6187-6205 s
+  - {name: after, start_s: 420, end_s: 480}   # run 6210-6270 s
+
+nidq:
+  bin: ${grp_data}/e038_g0/e038_g0_t0.nidq.bin
+  n_channels: 7          # XA0-XA5 + one digital word
+  emg_channel: 0
+  flow_channel: 5        # no airflow recorded; XA5 is a flat ~1.1 V line, kept only because the code reads a flow channel
+  ecg_channel: 4
+  file_start_s: 5790   # CatGT -startsecs
+  sync_map: ${outputs}/grp/e038/nidq_sync_map.json
+
+curation:
+  threshold_overrides:
+    mua:
+      presence_ratio: null   # as e097 (D4): units fall silent during gasping

@@ -1,0 +1,73 @@
+# m2020-19_g3, 1140-1540 s gate time, corrected for the tissue moves with a motion map measured from the units the
+# uncorrected sort split (option A, 2026-10-27). Recording, timings and epochs as m2020-19_g3_anoxia_window.yaml (that
+# config is the bridged rigid-DREDGE alternative), except that the hypoxia epoch is split at 235 s.
+#
+# The tissue moves three times (file time), timed with Kilosort 3's drift estimate in Nick Bush's sort of this gate
+# (rez2.mat): a step during the first gasping (~104-114 s), a partial return during the hypoxia (~190-235 s), and a
+# wobbling move during the second gasping (318-381 s). Units split across each move give the displacement by depth for
+# each state against baseline (anchors.tsv; template cosine >= 0.88):
+#   140-190 s (after gasp 1): +41 um to ~800 um, +77 to +81 um at 1200-2400 um, +90 at 2800, +120-130 at the top
+#   245-315 s (late hypoxia): +40 to +45 um to ~2200 um, +53-73 at 2400-2800, +78 at the top
+#   382-400 s (after gasp 2): +65 to +79 um to ~1900 um, +90-107 at 2000-2800, +125-130 at the top
+# The map holds each state's profile and draws straight lines across the moves. Known residuals (anchor_check): the deep
+# tissue drifts a further ~15-20 um during 165-190 s (also in Kilosort 3's estimate), and spikes during the second
+# gasping are not corrected for the gasp-by-gasp wobble.
+#
+# Input: the uncorrected run's preprocessed recording shifted by the map (kriging), made with
+#   python anchor_motion.py build ../outputs/bush2024/m2020-19_g3/anoxia_window_uncorrected ^
+#       --states 20-90 140-190 245-315 382-400 --ramps 104-114 190-235 318-381 --out configs/motion/m2020-19_g3_anchor_map
+#   python anchor_motion.py apply configs/motion/m2020-19_g3_anchor_map ^
+#       <scratch>/bush2024_m2020-19_g3_anoxia_window_uncorrected/preprocessed <scratch>/bush2024_m2020-19_g3_anchor_corrected
+# Spike times are seconds from 1140 s; add 1140 for gate time.
+
+experiment_name: m2020-19_g3_anoxia_window_400s_anchor
+
+paths:
+  output_dir: ${outputs}/bush2024/m2020-19_g3/anoxia_window_anchor
+  scratch_dir: ${scratch}/bush2024_m2020-19_g3_anoxia_window_anchor   # ~9 GB preprocessed binary + sorter folder
+
+input:
+  source: si_folder      # already preprocessed and motion-corrected (above)
+  folder: ${scratch}/bush2024_m2020-19_g3_anchor_corrected
+  start_s: null          # the folder holds only the window
+  duration_s: 400.0
+
+motion:
+  enabled: false         # corrected before sorting, with the anchor map
+
+sorters:
+  kilosort4:
+    enabled: true
+    params:
+      torch_device: cuda
+      do_correction: false
+  lupin:
+    enabled: false       # as in m2020-19_g3_anoxia_window.yaml
+
+job_kwargs:
+  n_jobs: 12
+
+# File time (gate time - 1140 s), from the valve lines and the Bush gasp rule.
+epochs:
+  - {name: baseline, start_s: 0, end_s: 63}             # room air
+  - {name: anoxia_1, start_s: 63, end_s: 99}            # N2 until the first gasp
+  - {name: gasping_1, start_s: 99, end_s: 117}
+  - {name: recovery_1, start_s: 117, end_s: 166.5}      # room air until the hypoxia valve
+  - {name: hypoxia_early, start_s: 166.5, end_s: 235}   # includes the partial return (~190-235 s)
+  - {name: hypoxia_late, start_s: 235, end_s: 305}
+  - {name: anoxia_2, start_s: 305, end_s: 324}          # N2 until the first gasp
+  - {name: gasping_2, start_s: 324, end_s: 381}
+  - {name: recovery_2, start_s: 381, end_s: 400}
+
+nidq:
+  bin: ${dynaresp}/m2020-19/catgt_m2020-19_g3/m2020-19_g3_t0.nidq.bin
+  n_channels: 9          # XA0-XA7 + one digital word
+  emg_channel: 1         # XA1 raw diaphragm EMG
+  flow_channel: 0        # XA0 plethysmography
+  ecg_channel: null
+  file_start_s: 1140.0   # the input folder starts 1140 s into the gate
+
+curation:
+  threshold_overrides:
+    mua:
+      presence_ratio: null   # as for e097 (D4): units may fall silent during gasping

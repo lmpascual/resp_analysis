@@ -1,0 +1,40 @@
+{
+ "recording": "e038_g0 window episodes (run time, imec clock; sort config sorting/configs/e038_episodes.yaml)",
+ "source": "experiment log e038.docx (mm:ss = run s) and the diaphragm (cibrrig breaths, Bush-rule gasps), 2026-10-29",
+ "conditions": [
+  {
+   "name": "baseline",
+   "start_raw_s": 6480.0,
+   "end_raw_s": 6560.0,
+   "source": "before the 6572 episode; the reference for PCA here",
+   "colour": "#6a6a66"
+  },
+  {
+   "name": "gasping",
+   "rule": "gasp_flag",
+   "source": "spontaneous episodes 6572, 6672, 6873 (Bush rule)",
+   "colour": "#d93636"
+  },
+  {
+   "name": "between 1",
+   "start_raw_s": 6602.0,
+   "end_raw_s": 6668.0,
+   "source": "between the first and second episode",
+   "colour": "#77c06a"
+  },
+  {
+   "name": "between 2",
+   "start_raw_s": 6702.0,
+   "end_raw_s": 6869.0,
+   "source": "between the second and third episode",
+   "colour": "#1c9157"
+  },
+  {
+   "name": "after",
+   "start_raw_s": 6911.0,
+   "end_raw_s": 6960.0,
+   "source": "after the third episode, until CNO",
+   "colour": "#0f6b3a"
+  }
+ ]
+}

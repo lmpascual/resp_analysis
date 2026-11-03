@@ -48,6 +48,15 @@ def parse_args():
     p.add_argument("--ref-k", type=int, default=6)
     p.add_argument("--n-segments", type=int, default=5)
     p.add_argument("--names", default=",".join(NAMES))
+    p.add_argument("--offset-s", type=float, default=OFFSET_S, help="raw-run time of the window start (e097: 1740)")
+    p.add_argument("--fixed", default=None,
+                   help="conditions file whose entries (other than the recovery names) are kept as they are "
+                        "(default: e097's baseline / anoxia / gasping)")
+    p.add_argument("--gasps-before-s", type=float, default=None,
+                   help="raw s: the recovery starts after the last gasp before this time (default: the last gasp)")
+    p.add_argument("--end-s", type=float, default=None, help="raw s: the recovery ends here (default: window end)")
+    p.add_argument("--recording", default="e097_g2 intact window (raw-run time)")
+    p.add_argument("--trial", default="anoxia #1", help="name in the figure title")
     p.add_argument("--out", required=True)
     return p.parse_args()
 
@@ -89,8 +98,12 @@ def main():
     seq = fits[f"k{k}_states"]
     ons = b["on_sec"].to_numpy()
     gasp = b["gasp"].to_numpy().astype(bool)
-    first = int(np.flatnonzero(gasp).max()) + 1                     # first breath after the last gasp
+    off = a.offset_s
+    g_sel = gasp & ((ons + off) < a.gasps_before_s) if a.gasps_before_s is not None else gasp
+    first = int(np.flatnonzero(g_sel).max()) + 1                    # first breath after the last gasp
     last = len(b) - 2                                               # last breath with a complete cycle
+    if a.end_s is not None:
+        last = min(last, int(np.searchsorted(ons + off, a.end_s)) - 2)
     idx = np.arange(first, last + 1)
     mix = np.stack([np.bincount(seq[int(ons[i] / dt):int(ons[i + 1] / dt)], minlength=k) for i in idx]).astype(float)
     mix /= np.maximum(mix.sum(axis=1, keepdims=True), 1)
@@ -105,26 +118,30 @@ def main():
     for key, Z in feats.items():
         starts, cost = segment(Z, a.n_segments, MIN_SEG)
         result[key] = {"start_breath": [int(idx[s]) for s in starts],
-                       "start_raw_s": [round(float(ons[idx[s]] + OFFSET_S), 2) for s in starts], "cost": round(cost, 2)}
+                       "start_raw_s": [round(float(ons[idx[s]] + off), 2) for s in starts], "cost": round(cost, 2)}
         print(f"{key:<11} starts (raw s): {result[key]['start_raw_s']}")
     starts = result["both"]["start_breath"] + [last + 1]
     rec = []
     for m, nm in enumerate(names):
         i0, i1 = starts[m], starts[m + 1]
         end = ons[i1] if i1 < len(b) else ons[-1]
-        rec.append({"name": nm, "start_raw_s": round(float(ons[i0] + OFFSET_S), 3),
-                    "end_raw_s": round(float(end + OFFSET_S), 3), "n_breaths": int(i1 - i0),
+        rec.append({"name": nm, "start_raw_s": round(float(ons[i0] + off), 3),
+                    "end_raw_s": round(float(end + off), 3), "n_breaths": int(i1 - i0),
                     "median_rate_per_min": round(float(60 / np.median(b["ibi_s"].to_numpy()[i0:i1])), 1),
                     "source": "change point in breathing + population state (epoch_change_points.py)",
                     **({"include": False} if nm in UNASSIGNED else {})})
-    conditions = [{**c, **({"colour": COLOURS[c["name"]]} if c["name"] in COLOURS else {})} for c in FIXED + rec]
-    out = {"recording": "e097_g2 intact window (raw-run time)", "ref_k": k, "min_segment_breaths": MIN_SEG,
+    fixed = FIXED
+    if a.fixed:
+        fixed = [c for c in json.loads(Path(a.fixed).read_text(encoding="utf-8"))["conditions"] if c["name"] not in names]
+    conditions = [{**c, **({"colour": COLOURS[c["name"]]} if c["name"] in COLOURS and "colour" not in c else {})}
+                  for c in fixed + rec]
+    out = {"recording": a.recording, "ref_k": k, "min_segment_breaths": MIN_SEG,
            "smooth_breaths": SMOOTH, "conditions": conditions, "change_points": result}
     Path(a.out).write_text(json.dumps(out, indent=1), encoding="utf-8")
     for r in rec:
         print(f"{r['name']:<18} {r['start_raw_s']:8.1f}-{r['end_raw_s']:8.1f} s  {r['n_breaths']:4d} breaths  "
               f"{r['median_rate_per_min']:.0f}/min")
-    plot(b, idx, mix, fits, k, result, rec, Path(a.out).with_suffix(".png"))
+    plot(b, idx, mix, fits, k, result, rec, Path(a.out).with_suffix(".png"), offset_s=off, trial=a.trial)
 
 
 def sighs(b):

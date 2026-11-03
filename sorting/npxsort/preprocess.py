@@ -122,20 +122,96 @@ def _estimate_motion_kwargs(m: dict) -> dict:
     return kwargs
 
 
+BRIDGE_EDGE_S = 5.0     # seconds of estimate averaged just before and just after each motion.bridge_s window
+
+
+def _bridge_motion(rec: si.BaseRecording, motion_info: dict, m: dict, out_dir: Path):
+    """Motion estimate that skips the motion.bridge_s windows (file time).
+
+    Registration by spike density fails when the spike pattern changes abruptly, as during gasping: fewer spikes, and
+    different neurons firing (e097 D2; m2021-31_g4, m2020-19). So the peaks inside each window are left out, the motion
+    is estimated again from the rest, and inside each window it is replaced by a straight line between its means over
+    the BRIDGE_EDGE_S seconds before and after. Returns the bridged Motion and, per window, the two edge values.
+    """
+    from spikeinterface.core.motion import Motion
+    from spikeinterface.preprocessing.motion import motion_options_preset
+    from spikeinterface.sortingcomponents.motion import estimate_motion
+
+    t_start = rec.get_start_time()
+    windows = [(t_start + a, t_start + b) for a, b in m["bridge_s"]]
+    peaks, locations = motion_info["peaks"], motion_info["peak_locations"]
+    t = rec.sample_index_to_time(peaks["sample_index"])
+    keep = np.ones(len(peaks), dtype=bool)
+    for a, b in windows:
+        keep &= ~((t >= a) & (t < b))
+    kwargs = dict(motion_options_preset[m["preset"]]["estimate_motion_kwargs"], **_estimate_motion_kwargs(m))
+    est = estimate_motion(rec, peaks[keep], locations[keep], **kwargs)
+    tb = np.asarray(est.temporal_bins_s[0])
+    raw = np.asarray(est.displacement[0], dtype=float)
+    d = raw.copy()
+    edges = []
+    for (a, b), (fa, fb) in zip(windows, m["bridge_s"]):
+        before = (tb >= a - BRIDGE_EDGE_S) & (tb < a)
+        after = (tb >= b) & (tb < b + BRIDGE_EDGE_S)
+        left = raw[before].mean(axis=0) if before.any() else raw[after].mean(axis=0)
+        right = raw[after].mean(axis=0) if after.any() else left
+        inside = (tb >= a) & (tb < b)
+        frac = ((tb[inside] - a) / (b - a))[:, None]
+        d[inside] = left + frac * (right - left)
+        edges.append({"start_s": fa, "end_s": fb, "before_um": np.round(left, 1).tolist(),
+                      "after_um": np.round(right, 1).tolist()})
+        log.info("Motion bridged over %.1f-%.1f s: %s -> %s um", fa, fb, np.round(left, 1), np.round(right, 1))
+    np.savez(out_dir / "motion_bridge.npz", temporal_bins_s=tb - t_start, spatial_bins_um=est.spatial_bins_um,
+             estimate_without_bridge_peaks=raw, bridged=d, bridge_s=np.asarray(m["bridge_s"], dtype=float))
+    return Motion(d, tb, est.spatial_bins_um, direction=est.direction), edges
+
+
+def motion_info_all_peaks(folder: Path, t_start: float):
+    """(time bins in file time, displacement) of the estimate saved by compute_motion in folder, or None."""
+    try:
+        from spikeinterface.core.motion import Motion
+
+        mo = Motion.load(folder / "motion")
+        return np.asarray(mo.temporal_bins_s[0]) - t_start, np.asarray(mo.displacement[0])
+    except Exception:
+        return None
+
+
 def _motion(rec: si.BaseRecording, cfg: dict, out_dir: Path, job_kwargs: dict):
     m = cfg["motion"]
     motion_folder = out_dir / "motion"
-    rec_corr, motion_info = spre.correct_motion(
-        rec,
-        preset=m["preset"],
-        folder=motion_folder,
-        output_motion_info=True,
-        overwrite=True,
-        detect_kwargs=m["detect_kwargs"],
-        estimate_motion_kwargs=_estimate_motion_kwargs(m),
-        interpolate_motion_kwargs=m["interpolate_motion_kwargs"],
-        **job_kwargs,
-    )
+    bridges = []
+    if not m["bridge_s"]:
+        rec_corr, motion_info = spre.correct_motion(
+            rec,
+            preset=m["preset"],
+            folder=motion_folder,
+            output_motion_info=True,
+            overwrite=True,
+            detect_kwargs=m["detect_kwargs"],
+            estimate_motion_kwargs=_estimate_motion_kwargs(m),
+            interpolate_motion_kwargs=m["interpolate_motion_kwargs"],
+            **job_kwargs,
+        )
+    else:
+        from spikeinterface.preprocessing.motion import motion_options_preset
+        from spikeinterface.sortingcomponents.motion import interpolate_motion
+
+        # motion_folder keeps the estimate from all peaks, for comparison with the bridged one
+        _, motion_info = spre.compute_motion(
+            rec,
+            preset=m["preset"],
+            folder=motion_folder,
+            output_motion_info=True,
+            overwrite=True,
+            detect_kwargs=m["detect_kwargs"],
+            estimate_motion_kwargs=_estimate_motion_kwargs(m),
+            **job_kwargs,
+        )
+        motion_info["motion"], bridges = _bridge_motion(rec, motion_info, m, out_dir)
+        interp = dict(motion_options_preset[m["preset"]]["interpolate_motion_kwargs"], **m["interpolate_motion_kwargs"])
+        rec_float = rec if rec.get_dtype().kind == "f" else rec.astype("float32")
+        rec_corr = interpolate_motion(rec_float, motion_info["motion"], **interp)
     motion = motion_info["motion"]
     disp = np.concatenate([np.asarray(d).ravel() for d in motion.displacement])
     summary = {
@@ -144,6 +220,8 @@ def _motion(rec: si.BaseRecording, cfg: dict, out_dir: Path, job_kwargs: dict):
         "median_abs_displacement_um": float(np.median(np.abs(disp))),
         "displacement_range_um": float(np.ptp(disp)),
     }
+    if bridges:
+        summary["bridges"] = bridges
     with open(out_dir / "motion_summary.json", "w") as f:
         json.dump(summary, f, indent=2)
     log.info("Motion: max |displacement| %.1f um, range %.1f um", summary["max_abs_displacement_um"], summary["displacement_range_um"])
@@ -159,6 +237,23 @@ def _motion(rec: si.BaseRecording, cfg: dict, out_dir: Path, job_kwargs: dict):
         w.figure.set_size_inches(16, 9)
         w.figure.savefig(out_dir / "motion.png", dpi=110)
         plt.close(w.figure)
+        if bridges:
+            z = np.load(out_dir / "motion_bridge.npz")
+            all_peaks = motion_info_all_peaks(out_dir / "motion", rec.get_start_time())
+            fig, ax = plt.subplots(figsize=(14, 4))
+            if all_peaks is not None:
+                ax.plot(all_peaks[0], np.median(all_peaks[1], axis=1), color="0.7", lw=0.8, label="all spikes (DREDGE as is)")
+            ax.plot(z["temporal_bins_s"], np.median(z["estimate_without_bridge_peaks"], axis=1), color="0.3", lw=0.8,
+                    label="without the bridge windows' spikes")
+            ax.plot(z["temporal_bins_s"], np.median(z["bridged"], axis=1), color="#d93636", lw=1.2, label="applied (bridged)")
+            for a, b in z["bridge_s"]:
+                ax.axvspan(a, b, color="#d93636", alpha=0.08, lw=0)
+            ax.set_xlabel("file time (s)")
+            ax.set_ylabel("displacement (um; median over depth)")
+            ax.legend(loc="upper left", fontsize=8, frameon=False)
+            fig.tight_layout()
+            fig.savefig(out_dir / "motion_bridge.png", dpi=110)
+            plt.close(fig)
     except Exception:  # a figure failing must not stop sorting, but it must be visible
         log.exception("Could not draw the motion figure (sorting continues).")
 

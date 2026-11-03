@@ -7,9 +7,10 @@ Every config and script names its folders relative to four roots, so the same fi
     scratch    sorting scratch space: preprocessed binaries and sorter folders (~10 GB per window)
     outputs    everything the pipeline and the analyses write
 
-Configs write them as ${raw_data}, ${catgt}, ${scratch} and ${outputs}; scripts call path("outputs") etc.
-Copy configs/local_paths.example.yaml to configs/local_paths.yaml and edit it (that file isn't in git). The
-RESP_ANALYSIS_PATHS environment variable can point to a different file.
+The file may define more roots for data kept elsewhere (e.g. dynaresp: the processed folder of the Bush & Ramirez
+2024 recordings); only configs that use them need them. Configs write roots as ${raw_data}, ${outputs}, ...;
+scripts call path("outputs") etc. Copy configs/local_paths.example.yaml to configs/local_paths.yaml and edit it (that
+file isn't in git). The RESP_ANALYSIS_PATHS environment variable can point to a different file.
 """
 from __future__ import annotations
 
@@ -21,7 +22,7 @@ from pathlib import Path
 import yaml
 
 REPO = Path(__file__).resolve().parents[2]
-KEYS = ("raw_data", "catgt", "scratch", "outputs")
+KEYS = ("raw_data", "catgt", "scratch", "outputs")     # required in every local_paths.yaml
 _VAR = re.compile(r"\$\{(\w+)\}")
 
 
@@ -41,17 +42,18 @@ def local_paths() -> dict[str, Path]:
     missing = [k for k in KEYS if not raw.get(k)]
     if missing:
         raise ValueError(f"{f}: set {', '.join(missing)}")
-    unknown = sorted(set(raw) - set(KEYS))
-    if unknown:
-        raise ValueError(f"{f}: unknown keys {unknown}; expected {list(KEYS)}")
-    return {k: Path(raw[k]) for k in KEYS}
+    bad = sorted(k for k, v in raw.items() if not isinstance(v, str) or not re.fullmatch(r"\w+", k))
+    if bad:
+        raise ValueError(f"{f}: {bad} must be names (letters, digits, _) set to a folder")
+    return {k: Path(v) for k, v in raw.items()}
 
 
 def path(name: str) -> Path:
-    """One root folder: path("outputs"), path("raw_data"), ..."""
-    if name not in KEYS:
-        raise KeyError(f"unknown path {name!r}; expected one of {list(KEYS)}")
-    return local_paths()[name]
+    """One root folder: path("outputs"), path("raw_data"), or an extra root defined in local_paths.yaml."""
+    roots = local_paths()
+    if name not in roots:
+        raise KeyError(f"{name!r} isn't set in {paths_file()}; it has {sorted(roots)}")
+    return roots[name]
 
 
 def relocated(recorded, root: str = "scratch") -> Path:
@@ -68,16 +70,12 @@ def relocated(recorded, root: str = "scratch") -> Path:
 
 
 def expand(value):
-    """Replace ${raw_data}, ${catgt}, ${scratch}, ${outputs} in a string, or in every string of a dict / list."""
+    """Replace ${raw_data}, ${outputs}, ... (any root in local_paths.yaml) in a string, or in every string of a
+    dict / list."""
     if isinstance(value, str):
         if "${" not in value:
             return value
-
-        def sub(m):
-            if m.group(1) not in KEYS:
-                raise KeyError(f"unknown ${{{m.group(1)}}} in {value!r}; expected one of {list(KEYS)}")
-            return path(m.group(1)).as_posix()
-        return _VAR.sub(sub, value)
+        return _VAR.sub(lambda m: path(m.group(1)).as_posix(), value)
     if isinstance(value, dict):
         return {k: expand(v) for k, v in value.items()}
     if isinstance(value, list):

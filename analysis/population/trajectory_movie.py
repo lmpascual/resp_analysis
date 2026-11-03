@@ -15,11 +15,15 @@ when it starts; a speed note shows while playback isn't real time.
 Playback: the last BASE_S of baseline in real time, anoxia to the end of early recovery at 2x, the rest at 8x.
 
   cibrrig python trajectory_movie.py [--run <population_dynamics run>] [--preview] [--pcs 1,3,2] [--elev --azim]
+  cibrrig python trajectory_movie.py [--run ...] [--preview] --layout 2d
 
 --pcs sets which PC goes on x, y and z (vertical). The default 1,2,3 stands the breathing loop up in the PC1-PC3 wall;
 1,3,2 lays it flat in PC1-PC3 with PC2 as its height, so the loop's plane rising and sinking between epochs shows.
+--layout 2d replaces the 3D view with three flat ones in equal units: PC1-PC3 (the breathing rotation; PC1 is mostly
+inspiratory against expiratory units, PC3 early against late expiratory units), PC1-PC2 under it and PC2-PC3 beside
+it (PC2 is unit 89 alone, analysis record F18, so it moves between epochs, not within a breath).
 
-Writes <run>/transitions/movie/<trial>_trajectory.mp4 (with --pcs 1,3,2: <trial>_trajectory_PC2-up.mp4) as H.264
+Writes <run>/transitions/movie/<trial>_trajectory.mp4 (_PC2-up with --pcs 1,3,2, _2D with --layout 2d) as H.264
 through ffmpeg, which environment/cibrrig.yml installs (without ffmpeg, OpenCV's MPEG-4 Part 2, about 10x larger and
 not always playable in PowerPoint); or with --preview ..._preview.png: six frames at key moments, to check the look
 before the long render.
@@ -44,7 +48,7 @@ sys.path.insert(0, str(HERE))
 import population_dynamics as pdm  # noqa: E402
 import transition_slides as tsl  # noqa: E402
 import transition_windows as tw  # noqa: E402
-from figures_population import INK, INK2, state_colour  # noqa: E402
+from figures_population import GRID, INK, INK2, state_colour  # noqa: E402
 
 import matplotlib.pyplot as plt  # noqa: E402
 from matplotlib.patches import Rectangle  # noqa: E402
@@ -71,7 +75,9 @@ def parse_args():
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     p.add_argument("--run", default=str(tw.RUN), help="population_dynamics.py output folder (anoxia #1 by default)")
     p.add_argument("--preview", action="store_true", help="six still frames instead of the movie")
-    p.add_argument("--pcs", default="1,2,3", help="the PCs on the x, y and z (vertical) axes; 1,3,2 puts PC2 up")
+    p.add_argument("--layout", choices=("3d", "2d"), default="3d",
+                   help="2d: PC1-PC3, PC1-PC2 and PC2-PC3 side by side instead of one 3D view")
+    p.add_argument("--pcs", default="1,2,3", help="3d: the PCs on the x, y and z (vertical) axes; 1,3,2 puts PC2 up")
     p.add_argument("--elev", type=float, help="camera elevation (default: VIEWS for the axis order)")
     p.add_argument("--azim", type=float, help="camera azimuth (default: VIEWS for the axis order)")
     a = p.parse_args()
@@ -118,8 +124,10 @@ def raster(c, units, n_bins):
 # ------------------------------------------------------------------------------------------------ figure
 
 class Movie:
-    def __init__(self, c, pcs=(1, 2, 3), elev=None, azim=None):
+    def __init__(self, c, pcs=(1, 2, 3), elev=None, azim=None, layout="3d"):
         self.c = c
+        self.layout = layout
+        pcs = (1, 2, 3) if layout == "2d" else pcs
         self.pcs = pcs
         view = VIEWS.get(pcs, VIEWS[(1, 2, 3)])
         elev, azim = view[0] if elev is None else elev, view[1] if azim is None else azim
@@ -180,6 +188,23 @@ class Movie:
         ar.text(-WIN_S * 1.1, n - 5, "10 neurons", rotation=90, ha="right", va="center", fontsize=13, color=INK)
         ar.set_xlim(-WIN_S, WIN_S)              # the scale bar outside mustn't widen it: "now" lines up with the trace
 
+        if self.layout == "2d":
+            self._build_2d(fig)
+        else:
+            self._build_3d(fig, elev, azim)
+        # legend slots, filled per frame (see draw): two columns of three
+        fig.text(0.19, 0.499, "HMM states: share of this epoch's 5 ms bins so far", fontsize=12, color=INK2, va="top")
+        self.leg = []
+        for j in range(k):
+            x, y = 0.195 + 0.31 * (j % 2), 0.477 - 0.017 * (j // 2)
+            mark = fig.add_artist(plt.Line2D([x], [y], marker="o", ms=12, ls="", transform=fig.transFigure))
+            self.leg.append((mark, fig.text(x + 0.014, y, "", fontsize=12, va="center")))
+
+        self.label = fig.text(0.5, 0.085, "", ha="center", va="center", fontsize=44, fontweight="bold", color=INK)
+        self.speed = fig.text(0.5, 0.04, "", ha="center", va="center", fontsize=26, color=INK2)
+        self.fig = fig
+
+    def _build_3d(self, fig, elev, azim):
         ax = fig.add_axes((self.x0, 0.10, 0.66, 0.40), projection="3d")   # x0 < 0.17 when the box leans right
         ax.patch.set_alpha(0)
         lims = [tw.PC_LIMITS[p - 1] for p in self.pcs]
@@ -197,17 +222,67 @@ class Movie:
         self.dots = ax.scatter([], [], [], s=DOT_SIZE, depthshade=False, edgecolors="none")
         self.trail, = ax.plot([], [], [], color=INK, lw=1.8)
         self.head = ax.scatter([], [], [], s=110, depthshade=False, edgecolors=INK, linewidths=1.2)
-        # legend slots, filled per frame (see draw): two columns of three
-        fig.text(0.19, 0.499, "HMM states: share of this epoch's 5 ms bins so far", fontsize=12, color=INK2, va="top")
-        self.leg = []
-        for j in range(k):
-            x, y = 0.195 + 0.31 * (j % 2), 0.477 - 0.017 * (j // 2)
-            mark = fig.add_artist(plt.Line2D([x], [y], marker="o", ms=12, ls="", transform=fig.transFigure))
-            self.leg.append((mark, fig.text(x + 0.014, y, "", fontsize=12, va="center")))
 
-        self.label = fig.text(0.5, 0.085, "", ha="center", va="center", fontsize=44, fontweight="bold", color=INK)
-        self.speed = fig.text(0.5, 0.04, "", ha="center", va="center", fontsize=26, color=INK2)
-        self.fig = fig
+    def _build_2d(self, fig):
+        """Three views with equal units: PC1-PC3 (the breathing rotation), PC1-PC2 under it sharing PC1, and
+        PC2-PC3 beside it sharing PC3."""
+        px, left, top, gap = 133, 255, 1100, 25      # pixels per PC unit; panel block's top-left corner and gap
+        rng = [tw.PC_LIMITS[d][1] - tw.PC_LIMITS[d][0] for d in range(3)]
+        w1, w2, h2, h3 = px * rng[0], px * rng[1], px * rng[1], px * rng[2]
+
+        def box(x, y, w, h):                          # pixels from the top-left -> figure fraction
+            return x / W, 1 - (y + h) / H, w / W, h / H
+
+        specs = [((0, 2), box(left, top, w1, h3), False, True),                 # (x PC, y PC), rect, x / y labels
+                 ((0, 1), box(left, top + h3 + gap, w1, h2), True, True),
+                 ((1, 2), box(left + w1 + gap, top, w2, h3), True, False)]
+        self.panels = []
+        for (dx, dy), rect, xl, yl in specs:
+            ax = fig.add_axes(rect)
+            ax.set_xlim(*tw.PC_LIMITS[dx])
+            ax.set_ylim(*tw.PC_LIMITS[dy])
+            for d, axis in ((dx, ax.xaxis), (dy, ax.yaxis)):
+                lo, hi = tw.PC_LIMITS[d]
+                axis.set_ticks(np.arange(np.ceil(lo * 2) / 2, hi + 1e-9, 0.5))
+            ax.tick_params(labelsize=11, colors=INK2, labelbottom=xl, labelleft=yl, length=3)
+            if xl:
+                ax.set_xlabel(f"PC{dx + 1}", fontsize=14, color=INK2, labelpad=2)
+            if yl:
+                ax.set_ylabel(f"PC{dy + 1}", fontsize=14, color=INK2, labelpad=2)
+            ax.grid(color=GRID, lw=0.6)
+            ax.set_axisbelow(True)
+            for side, s in ax.spines.items():
+                s.set_visible(side in ("left", "bottom"))
+                s.set_color(INK2)
+            sc = ax.scatter([], [], s=DOT_SIZE, edgecolors="none")
+            trail, = ax.plot([], [], color=INK, lw=1.6, zorder=3)
+            head = ax.scatter([], [], s=90, edgecolors=INK, linewidths=1.1, zorder=4)
+            self.panels.append((dx, dy, sc, trail, head))
+        # what the axes track (e097 anoxia #1 loadings and baseline cycle; analysis record F18), in the empty corner
+        x, y = (left + w1 + gap + 4) / W, 1 - (top + h3 + 85) / H          # below the PC2-PC3 panel's x label
+        fig.text(x, y, "PC1  inspiratory (+)\n         vs expiratory (−)\nPC3  post-I / early E (+)\n"
+                 "         vs late E (−)\nPC2  unit 89 alone (tonic):\n         shifts between epochs,\n"
+                 "         not within a breath", fontsize=9.5, color=INK2, va="top", linespacing=1.35)
+
+    def _points(self, idx, rgba, tr, i1):
+        """Dots, the last TRAIL_S as a line, and the current bin as a larger dot, in 3D or in each 2D view."""
+        last = self.P[[i1 - 1]] if i1 > self.first_bin else None
+        if self.layout == "2d":
+            Pi = self.P[idx]
+            for dx, dy, sc, trail, head in self.panels:
+                sc.set_offsets(Pi[:, [dx, dy]])
+                sc.set_facecolors(rgba)
+                trail.set_data(self.P[tr, dx], self.P[tr, dy])
+                if last is not None:
+                    head.set_offsets(last[:, [dx, dy]])
+                    head.set_facecolors([self.rgb[i1 - 1]])
+            return
+        self.dots._offsets3d = tuple(self.P[idx].T)
+        self.dots.set_facecolors(rgba)
+        self.trail.set_data_3d(*self.P[tr].T)
+        if last is not None:
+            self.head._offsets3d = tuple(last.T)
+            self.head.set_facecolors([self.rgb[i1 - 1]])
 
     def draw(self, i):
         """Frame i of the playback (not counting the title card); returns it as an RGB array."""
@@ -234,13 +309,8 @@ class Movie:
         g = np.where(ep < J - 1, 1.0, np.where(ep == J - 1, min(1.0, (i - self.epoch_first[J]) / (GREY_FADE_S * FPS)),
                                                0.0))[:, None]
         rgba = np.column_stack([self.rgb[idx] * (1 - g) + GREY * g, DOT_ALPHA * (1 - g[:, 0]) + GREY_ALPHA * g[:, 0]])
-        self.dots._offsets3d = tuple(self.P[idx].T)
-        self.dots.set_facecolors(rgba)
         tr = np.arange(max(self.first_bin, i1 - int(TRAIL_S / pdm.PCA_BIN_S)), i1)
-        self.trail.set_data_3d(*self.P[tr].T)
-        if i1 > self.first_bin:
-            self.head._offsets3d = tuple(self.P[[i1 - 1]].T)
-            self.head.set_facecolors([self.rgb[i1 - 1]])
+        self._points(idx, rgba, tr, i1)
 
         # legend: states seen so far in the movie; coloured if in this epoch so far, paler the rarer, else grey
         seen = self.cum[i1] - self.cum[self.first_bin] > 0
@@ -332,10 +402,11 @@ def main():
     a = parse_args()
     run = Path(a.run)
     c = tw.load_context(run)
-    m = Movie(c, a.pcs, a.elev, a.azim)
+    m = Movie(c, a.pcs, a.elev, a.azim, a.layout)
     out = run / "transitions" / "movie"
     out.mkdir(parents=True, exist_ok=True)
-    tag = m.trial.replace(" #", "").replace(" ", "_") + "_trajectory" + ("" if a.pcs == (1, 2, 3) else f"_PC{a.pcs[2]}-up")
+    tag = m.trial.replace(" #", "").replace(" ", "_") + "_trajectory" + (
+        "_2D" if a.layout == "2d" else "" if a.pcs == (1, 2, 3) else f"_PC{a.pcs[2]}-up")
     names = [n for n, _, _ in m.spans]
     if a.preview:
         def at(name, frac):

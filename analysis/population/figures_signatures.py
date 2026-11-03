@@ -526,6 +526,10 @@ def unit_story(c, u):
     after_gasp = conds[conds.index("gasping") + 1:]
     first, last = after_gasp[0], after_gasp[-1]          # e.g. early recovery, later recovery
     base, gasp, rec, post = r["baseline"], r["gasping"], r[first], r[last]
+    # the challenge before gasping: anoxia in e097, else the last condition before gasping (e.g. hypoxia)
+    before = [x for x in conds[:conds.index("gasping")] if x != "baseline"]
+    chal = "anoxia" if "anoxia" in r else (before[-1] if before else "the challenge")
+    r_chal = r.get(chal, np.nan)
     t, P = peths(c, u, "on")
     feat = {x: peth_features(t, P[x][0]) for x in P}
     ramp_in = ("gasping" in feat and feat["gasping"]["ramp_ratio_last50_vs_early"] >= 2.5
@@ -534,11 +538,11 @@ def unit_story(c, u):
         group = "silent at baseline"
         kind = "Unit silent at baseline"
         if gasp >= 1:
-            act = "fires during anoxia and gasping" if r["anoxia"] >= 1 else "fires only around the gasps"
+            act = f"fires during {chal} and gasping" if r_chal >= 1 else "fires only around the gasps"
             if ramp_in:
                 act = "ramps up into each gasp"
-        elif r["anoxia"] >= 1:
-            act = "fires mainly during anoxia"
+        elif r_chal >= 1:
+            act = f"fires mainly during {chal}"
         else:
             act = "barely fires"
         after = "silent again afterwards" if not post >= 0.2 else "keeps firing afterwards"
@@ -614,7 +618,7 @@ def write_slide_manifest(c):
                      "peth": str(c["slide_out"] / f"unit_{u}_peth.png")})
     order = {g: i for i, (g, _) in enumerate(SLIDE_GROUPS)}
     rows.sort(key=lambda x: order.get(x["group"], 99))
-    manifest = {"title": f"e097 anoxia #1: {len(rows)} reviewed single units",
+    manifest = {"title": f"{c.get('title', 'e097 anoxia #1')}: {len(rows)} {c.get('unit_desc', 'reviewed single units')}",
                 "subtitle": f"Spikes on every breath, and PETHs and phase curves from baseline to {c['conditions'][-1]}",
                 "groups": [{"key": g, "title": t, "n": sum(r["group"] == g for r in rows)} for g, t in SLIDE_GROUPS],
                 "condition_colours": c["cond_colours"], "conditions": condition_spans_raw(c), "units": rows,
@@ -708,21 +712,34 @@ def write_features(c):
 
 
 def make_all(c):
+    """As figures_population.make_all: a figure that fails is logged in c['skipped'] and the others still get made."""
+    import logging
+    import traceback
+    log = logging.getLogger("population_dynamics")
+    c.setdefault("skipped", [])
+
+    def run(f, *args):
+        try:
+            f(c, *args)
+        except Exception as e:  # noqa: BLE001
+            plt.close("all")
+            c["skipped"].append(f"{f.__name__}{args}: {type(e).__name__}: {e}")
+            log.warning("figure %s%s skipped: %s\n%s", f.__name__, args, e, traceback.format_exc(limit=3))
     c["sig_out"] = c["out"] / "signatures"
     c["unit_out"] = c["out"] / "units"
     c["sig_out"].mkdir(exist_ok=True)
     c["unit_out"].mkdir(exist_ok=True)
-    fig_fingerprints(c)
+    run(fig_fingerprints)
     for k in c["ks"]:
-        fig_state_progression(c, k)
+        run(fig_state_progression, k)
     for align in ("on", "off"):
-        fig_population_peth(c, align)
-    fig_polar(c)
+        run(fig_population_peth, align)
+    run(fig_polar)
     c["slide_out"] = c["out"] / "units_slides"
     c["slide_out"].mkdir(exist_ok=True)
     for u in c["order_units"]:
-        unit_state_card(c, u)
-        unit_slide_raster(c, u)
-        unit_slide_peth(c, u)
-    write_slide_manifest(c)
-    write_features(c)
+        run(unit_state_card, u)
+        run(unit_slide_raster, u)
+        run(unit_slide_peth, u)
+    run(write_slide_manifest)
+    run(write_features)

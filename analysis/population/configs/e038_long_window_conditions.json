@@ -1,0 +1,17 @@
+{
+ "recording": "e038_g0 long window 3300-8627 s (run time = imec clock; sort config sorting/configs/e038_long_window.yaml)",
+ "source": "experiment log e038.docx (run seconds) and the diaphragm: Bush-rule gasps, cibrrig breaths; checked 2026-10-29",
+ "conditions": [
+  {"name": "control", "start_raw_s": 3400.0, "end_raw_s": 3900.0, "source": "trial-free, after the insertion (ends ~3250) and before the logged baseline", "colour": "#b5b4ae"},
+  {"name": "baseline", "start_raw_s": 4000.0, "end_raw_s": 4500.0, "source": "pre-trial baseline (user); log baseline 3900-4500", "colour": "#6a6a66"},
+  {"name": "anoxia", "spans": [[4860.0, 4879.0], [5340.0, 5360.5]], "source": "logged anoxia #1 (4860-4872) and #2 (5340-5355) until the first gasp", "colour": "#f2918a"},
+  {"name": "gasping", "rule": "gasp_flag", "spans": [[4860.0, 5400.0]], "source": "anoxic gasps, Bush rule: 4879-4890 (8) and 5361-5373 (8)", "colour": "#d93636"},
+  {"name": "recovery #1", "start_raw_s": 4895.0, "end_raw_s": 5335.0, "source": "after anoxia #1 gasps until anoxia #2", "colour": "#77c06a"},
+  {"name": "recovery #2", "start_raw_s": 5378.0, "end_raw_s": 5640.0, "source": "after anoxia #2 gasps until the 5644 episode (non-gasp breaths)", "colour": "#1c9157"},
+  {"name": "post-trial", "start_raw_s": 5850.0, "end_raw_s": 5950.0, "source": "post-trial, pre-instability (user); after the 5694-5787 laser trains", "colour": "#eda100"},
+  {"name": "pre-episode", "spans": [[5614.0, 5642.0], [6046.0, 6074.0], [6157.0, 6185.0], [6542.0, 6570.0], [6642.0, 6670.0], [6843.0, 6871.0], [6964.0, 6992.0]], "source": "28 s before each spontaneous episode's first gasp", "colour": "#a77bd6"},
+  {"name": "spontaneous gasping", "rule": "gasp_flag", "spans": [[5440.0, 7100.0]], "source": "Bush-rule gasps of the spontaneous episodes 5467, 5644, 6076, 6187, 6572, 6672, 6873, 6994", "colour": "#8f1d1d"},
+  {"name": "late", "start_raw_s": 7600.0, "end_raw_s": 8400.0, "source": "stable breathing after the episodes and CNO (log 2:18 'seems stable')", "colour": "#0f6b3a"},
+  {"name": "terminal gasping", "rule": "gasp_flag", "spans": [[8440.0, 8630.0]], "source": "final gasping to death (log 2:21)", "colour": "#3d0b0b"}
+ ]
+}

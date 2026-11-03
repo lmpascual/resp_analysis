@@ -1,0 +1,17 @@
+{
+ "recording": "e040_g0 long window 3900-10215 s (run time = imec clock; sort config sorting/configs/e040_long_window.yaml)",
+ "source": "experiment log e040.docx (run seconds) and the diaphragm: Bush-rule gasps, cibrrig breaths, tonic EMG; checked 2026-10-29",
+ "conditions": [
+  {"name": "baseline", "start_raw_s": 4000.0, "end_raw_s": 4560.0, "source": "before anoxia #1", "colour": "#6a6a66"},
+  {"name": "anoxia #1-2", "spans": [[4565.0, 4600.0], [5220.0, 5255.0]], "source": "logged anoxias #1 and #2 + 20 s; no gasps", "colour": "#f6c8a8"},
+  {"name": "anoxia", "start_raw_s": 5700.0, "end_raw_s": 5719.0, "source": "logged anoxia #3 until the first gasp", "colour": "#f2918a"},
+  {"name": "gasping", "rule": "gasp_flag", "spans": [[5700.0, 5800.0]], "source": "anoxia #3 gasps, Bush rule 5719-5766", "colour": "#d93636"},
+  {"name": "early recovery", "start_raw_s": 5770.0, "end_raw_s": 6100.0, "source": "irregular 50-150/min (log 'not recovering well', 'still going nuts')", "colour": "#77c06a"},
+  {"name": "mid recovery", "start_raw_s": 6100.0, "end_raw_s": 6750.0, "source": "130-140/min, Ti ~0.2 s, until the step at ~6750", "colour": "#1c9157"},
+  {"name": "later recovery", "start_raw_s": 6750.0, "end_raw_s": 7260.0, "source": "~180/min after the step, until CNO", "colour": "#0f6b3a"},
+  {"name": "after CNO", "start_raw_s": 7290.0, "end_raw_s": 7600.0, "source": "tonic diaphragm activity suppressed", "colour": "#2a78d6"},
+  {"name": "tonic", "start_raw_s": 7600.0, "end_raw_s": 9000.0, "source": "tonic activity back, 1-2 sighs/min", "colour": "#eda100"},
+  {"name": "tonic + sighs", "start_raw_s": 9000.0, "end_raw_s": 9985.0, "source": "most tonic activity and sighs (log 'sigh rate increased', 'diaphragm tonicity')", "colour": "#c27a00"},
+  {"name": "terminal gasping", "rule": "gasp_flag", "spans": [[9985.0, 10215.0]], "source": "anoxia #4 (9990) gasps 10005-10036 and 10075-10179, death", "colour": "#3d0b0b"}
+ ]
+}

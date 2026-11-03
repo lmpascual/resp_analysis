@@ -158,6 +158,11 @@ that folder while you curate. The analyzer and unit tables don't need it.
   drift itself.
 - `input.source: spikeglx_raw`: sorts raw SpikeGLX instead of CatGT output, with all
   preprocessing done here.
+- `input.start_s` / `duration_s`: sorts a window of a longer file (e.g. a whole CatGT'd gate, as for
+  `configs/m2021-31_g4_hypoxia_window.yaml`); spike times then count from `start_s`.
+- `nidq`: the run's NIDQ file, its diaphragm EMG / airflow / ECG channels, and the run time at the
+  start of the input file. The sorting ignores it; `analysis/population` reads it from
+  `config_used.yaml` to cut the breathing signals for the sorted window.
 
 ## Testing
 

@@ -1,0 +1,51 @@
+{
+ "recording": "e038_g0 window anoxia2 (run time, imec clock; sort config sorting/configs/e038_anoxia2.yaml)",
+ "source": "experiment log e038.docx (mm:ss = run s) and the diaphragm (cibrrig breaths, Bush-rule gasps), 2026-10-29",
+ "conditions": [
+  {
+   "name": "baseline",
+   "start_raw_s": 5280.0,
+   "end_raw_s": 5340.0,
+   "source": "60 s before anoxia #2 (log 1:29:00): the state after anoxia #1",
+   "colour": "#6a6a66"
+  },
+  {
+   "name": "anoxia",
+   "start_raw_s": 5340.0,
+   "end_raw_s": 5360.5,
+   "source": "logged anoxia #2 5340-5355 until the first gasp",
+   "colour": "#f2918a"
+  },
+  {
+   "name": "gasping",
+   "rule": "gasp_flag",
+   "source": "anoxic gasps (Bush rule)",
+   "colour": "#d93636",
+   "spans": [
+    [
+     5340,
+     5400
+    ]
+   ]
+  },
+  {
+   "name": "recovery",
+   "start_raw_s": 5378.0,
+   "end_raw_s": 5640.0,
+   "source": "after the last anoxic gasp until the 5644 bout (non-gasp breaths)",
+   "colour": "#77c06a"
+  },
+  {
+   "name": "spontaneous gasping",
+   "rule": "gasp_flag",
+   "spans": [
+    [
+     5440,
+     5694
+    ]
+   ],
+   "source": "Bush-rule gasps of the 5467 and 5644 bouts",
+   "colour": "#8f1d1d"
+  }
+ ]
+}

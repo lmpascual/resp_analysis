@@ -49,6 +49,14 @@ epochs:
   - {name: recovery, start_s: 140, end_s: 338}
   - {name: active_expiration, start_s: 338, end_s: 410}
 
+# NIDQ of run e097_g2 (read by analysis/population): XA0 diaphragm EMG, XA2 ECG, XA5 airflow.
+nidq:
+  bin: ${raw_data}/e097_g2/e097_g2_t0.nidq.bin
+  emg_channel: 0
+  flow_channel: 5
+  ecg_channel: 2
+  file_start_s: 1740.0     # CatGT -startsecs of this extract
+
 curation:
   threshold_overrides:
     mua:

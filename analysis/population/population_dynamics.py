@@ -1,10 +1,18 @@
 """Population dynamics of reviewed single units across eupnea, anoxia, gasping and recovery (e097 anoxia #1).
 
-The defaults read the Kilosort 4 sort of the intact window (<outputs>/e097/intact_window_v2: kilosort4/alf, the review
-verdicts in review/kilosort4_unit_review.tsv, config_used.yaml) and the diaphragm EMG from the raw NIDQ file
-(<raw_data>/e097_g2/e097_g2_t0.nidq.bin; the window's 420 s from --time-offset-s are cached in <out>/cache/
-nidq_cache.npz). The 2026-10-20 run read a snapshot of these spikes taken during the postprocess redo; the 2026-10-21
-rerun on the finished redo gave identical results.
+The defaults read the Kilosort 4 sort of the e097 intact window (<outputs>/e097/intact_window_v2: kilosort4/alf, the
+review verdicts in review/kilosort4_unit_review.tsv, config_used.yaml); --sort points at another sort. The diaphragm
+EMG and airflow come from the run's raw NIDQ file, read as the sort config's `nidq` section says (file, channels, and
+where the sorted window starts in the run); the window is cached in <out>/cache/nidq_cache.npz. A config_used.yaml
+without a `nidq` section (sorts made before 2026-10-26) is read as the e097 intact window: <raw_data>/e097_g2, EMG on
+XA0, airflow on XA5, 420 s from 1740 s. The 2026-10-20 run read a snapshot of the spikes taken during the postprocess
+redo; the 2026-10-21 rerun on the finished redo gave identical results.
+
+Another recording, before its units are reviewed (bombcell-good units instead of review verdicts):
+
+    python population_dynamics.py --sort <outputs>/bush2024/m2021-31_g4/hypoxia_window --labels good ^
+        --conditions-file analysis/population/configs/m2021-31_g4_conditions.json ^
+        --out <outputs>/bush2024/m2021-31_g4/population_dynamics
 
 Run in the `cibrrig` env (hmmlearn + Nick Bush's cibrrig, so breaths, phase and PCA preprocessing are the
 Bush & Ramirez code itself). First without conditions, then split the recovery at change points, then again:
@@ -97,8 +105,8 @@ log = logging.getLogger("population_dynamics")
 OUT = path("outputs") / "e097"
 SORT = OUT / "intact_window_v2"                         # anoxia #1 sort (raw-run 1740-2160 s)
 NIDQ_BIN = path("raw_data") / "e097_g2" / "e097_g2_t0.nidq.bin"
-NIDQ_CHANNELS, CH_EMG, CH_FLOW = 9, 0, 5                # XA0 diaphragm EMG, XA5 airflow
-WINDOW_S = 420.0                                        # CatGT -maxsecs of the intact window
+NIDQ_CHANNELS, CH_EMG, CH_FLOW = 9, 0, 5                # e097: XA0 diaphragm EMG, XA5 airflow
+E097_START_S, WINDOW_S = 1740.0, 420.0                  # CatGT -startsecs / -maxsecs of the e097 intact window
 HMM_BIN_S = 0.005
 PCA_BIN_S, PCA_SIGMA_S = 0.005, 0.010        # Bush & Ramirez 2024/2025
 PHASE_BINS = 36                             # HMM state profiles over phi
@@ -121,19 +129,29 @@ COND_PALETTE = ["#6a6a66", "#f2918a", "#d93636", "#77c06a", "#1c9157", "#eda100"
 
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    alf = SORT / "kilosort4" / "alf"
-    p.add_argument("--spikes-dir", default=str(alf), help="folder with spike_times.npy (s) and spike_clusters.npy")
-    p.add_argument("--units", default=str(alf / "units.tsv"))
-    p.add_argument("--review", default=str(SORT / "review" / "kilosort4_unit_review.tsv"))
+    p.add_argument("--sort", default=str(SORT),
+                   help="sort output folder; --spikes-dir, --units, --review and --config default to its kilosort4/alf, "
+                        "review/kilosort4_unit_review.tsv and config_used.yaml")
+    p.add_argument("--spikes-dir", default=None, help="folder with spike_times.npy (s) and spike_clusters.npy")
+    p.add_argument("--units", default=None)
+    p.add_argument("--review", default=None)
+    p.add_argument("--labels", default=None,
+                   help="comma-separated bombcell labels (e.g. good) to use instead of the review's 'single' verdicts, "
+                        "for a first look at a sort that hasn't been reviewed")
     p.add_argument("--removed", default="",
                    help="removed_spikes.tsv to apply on top ('' for none; the sort's own removals are already applied)")
-    p.add_argument("--config", default=str(SORT / "config_used.yaml"))
-    p.add_argument("--nidq-bin", default=str(NIDQ_BIN), help="raw SpikeGLX NIDQ file of the whole run")
+    p.add_argument("--config", default=None)
+    p.add_argument("--nidq-bin", default=None, help="raw SpikeGLX NIDQ file of the whole run (default: the config's nidq.bin)")
     p.add_argument("--nidq-cache", default="",
                    help="npz with emg_v / flow_v at 10 kHz from the start of the window "
-                        "(default <out>/cache/nidq_cache.npz, made from --nidq-bin if missing)")
-    p.add_argument("--time-offset-s", type=float, default=1740.0, help="window start in raw-run time (CatGT -startsecs)")
-    p.add_argument("--window-s", type=float, default=WINDOW_S, help="window length (CatGT -maxsecs)")
+                        "(default <out>/cache/nidq_cache.npz, made from the NIDQ file if missing)")
+    p.add_argument("--time-offset-s", type=float, default=None,
+                   help="window start in raw-run time (default: the config's nidq.file_start_s + input.start_s)")
+    p.add_argument("--window-s", type=float, default=None, help="window length (default: the config's input.duration_s)")
+    p.add_argument("--from-s", type=float, default=None,
+                   help="analyse only a sub-window of the sort, from this file time (s from the sort's start); "
+                        "spike and breath times are then counted from it")
+    p.add_argument("--to-s", type=float, default=None, help="end of the sub-window (file time of the sort)")
     p.add_argument("--conditions-file", default=None,
                    help="epochs JSON from epoch_change_points.py (raw-run time); default: config epochs")
     p.add_argument("--hmm-sigma-ms", type=float, default=5.0)
@@ -144,9 +162,49 @@ def parse_args():
     p.add_argument("--n-restarts", type=int, default=10)
     p.add_argument("--n-iter", type=int, default=300)
     p.add_argument("--n-jobs", type=int, default=8)
+    p.add_argument("--title", default=None,
+                   help="recording name in figure and slide titles (default: 'e097 anoxia #1' for the default sort, "
+                        "otherwise the sort config's experiment_name)")
     p.add_argument("--figures-only", action="store_true", help="redraw figures from <out>/cache/ctx.pkl")
     p.add_argument("--out", required=True)
-    return p.parse_args()
+    a = p.parse_args()
+    sort = Path(a.sort)
+    a.spikes_dir = a.spikes_dir or str(sort / "kilosort4" / "alf")
+    a.units = a.units or str(Path(a.spikes_dir) / "units.tsv")
+    a.review = a.review or str(sort / "review" / "kilosort4_unit_review.tsv")
+    a.config = a.config or str(sort / "config_used.yaml")
+    return a
+
+
+def extract_seconds(inp) -> float | None:
+    """Length of the sorted input file (its .ap.meta fileTimeSecs, minus input.start_s), for configs that sort a whole
+    CatGT extract and so give no duration_s; None if the folder or meta isn't there."""
+    try:
+        meta = next(Path(inp["folder"]).glob("*.ap.meta"))
+    except (KeyError, TypeError, StopIteration, OSError):
+        return None
+    secs = next((float(x.split("=", 1)[1]) for x in meta.read_text().splitlines() if x.startswith("fileTimeSecs=")), None)
+    return None if secs is None else secs - float(inp.get("start_s") or 0.0)
+
+
+def nidq_settings(a, cfg) -> dict:
+    """NIDQ file and channels, and the window's start (raw-run s) and length: the command line, else the sort config's
+    `nidq` and `input` sections, else the e097 intact window (configs from before the `nidq` section existed)."""
+    n, inp = cfg.get("nidq") or {}, cfg.get("input") or {}
+    if a.time_offset_s is None:
+        a.time_offset_s = float(n["file_start_s"]) + float(inp.get("start_s") or 0.0) if n else E097_START_S
+    if a.window_s is None:
+        a.window_s = float(inp["duration_s"]) if inp.get("duration_s") else extract_seconds(inp) or WINDOW_S
+    if a.from_s is not None or a.to_s is not None:          # a sub-window of the sort, in its file time
+        a.from_s = a.from_s or 0.0
+        a.to_s = a.window_s if a.to_s is None else a.to_s
+        a.time_offset_s += a.from_s
+        a.window_s = a.to_s - a.from_s
+    return {"bin": a.nidq_bin or n.get("bin") or str(NIDQ_BIN),
+            "n_channels": int(n.get("n_channels") or NIDQ_CHANNELS),
+            "emg": CH_EMG if n.get("emg_channel") is None else int(n["emg_channel"]),
+            "flow": CH_FLOW if n.get("flow_channel") is None else int(n["flow_channel"]),
+            "sync_map": n.get("sync_map")}
 
 
 # ----------------------------------------------------------------------------------------------- data
@@ -154,9 +212,14 @@ def parse_args():
 def load_units(a):
     st = np.load(Path(a.spikes_dir) / "spike_times.npy")
     sc = np.load(Path(a.spikes_dir) / "spike_clusters.npy")
-    review = pd.read_csv(a.review, sep="\t")
     units = pd.read_csv(a.units, sep="\t").set_index("unit_id")
-    ids = np.sort(review.loc[review["verdict"] == "single", "unit_id"].to_numpy())
+    if a.labels:
+        labels = [x.strip() for x in a.labels.split(",")]
+        ids = np.sort(units.index[units["label"].isin(labels)].to_numpy())
+        log.info("units: %d labelled %s (review verdicts not used)", ids.size, labels)
+    else:
+        review = pd.read_csv(a.review, sep="\t")
+        ids = np.sort(review.loc[review["verdict"] == "single", "unit_id"].to_numpy())
     removed = pd.read_csv(a.removed, sep="\t") if a.removed else pd.DataFrame(columns=["unit_id", "time_s"])
     spikes = {}
     for u in ids:
@@ -164,22 +227,39 @@ def load_units(a):
         rm = removed.loc[removed["unit_id"] == u, "time_s"].to_numpy()
         if rm.size:
             t = t[np.abs(t[:, None] - rm[None, :]).min(axis=1) > 1e-4]
+        if a.from_s is not None:                            # sub-window: its own time zero
+            t = t[(t >= a.from_s) & (t < a.to_s)] - a.from_s
         spikes[int(u)] = t
     info = units.loc[ids, ["label", "depth_um", "peak_channel_index"]].reset_index()
     info["n_spikes"] = [spikes[int(u)].size for u in ids]
     return spikes, info
 
 
-def nidq_cache(path: Path, nidq_bin, start_s: float, duration_s: float) -> Path:
+def nidq_cache(path: Path, nidq_bin, start_s: float, duration_s: float, n_channels: int = NIDQ_CHANNELS,
+               emg: int = CH_EMG, flow: int = CH_FLOW, sync_map=None) -> Path:
     """Raw diaphragm EMG (emg_v) and airflow (flow_v) in volts at 10 kHz, from sample int(start_s * 10 kHz) of the
-    NIDQ file. Written once; identical to the cache the 2026-10 analyses used."""
+    NIDQ file (volts from the .meta's niAiRangeMax, 10 V if there is no .meta). Written once; for e097, identical to
+    the cache the 2026-10 analyses used. With a sync map (analysis/session/nidq_sync.py), start_s is imec time and
+    each 10 kHz sample is the nearest NIDQ sample on the imec clock instead (needed for runs of hours)."""
     if not path.exists():
         s0, n = int(start_s * NIDQ_FS), int(duration_s * NIDQ_FS)
         raw = np.memmap(nidq_bin, dtype="int16", mode="r")
-        blk = np.asarray(raw[s0 * NIDQ_CHANNELS:(s0 + n) * NIDQ_CHANNELS]).reshape(-1, NIDQ_CHANNELS)
+        if sync_map:
+            sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "session"))
+            from nidq_sync import nidq_rows
+            rows = nidq_rows(json.loads(Path(sync_map).read_text()), start_s, n, NIDQ_FS)
+            rows = rows[rows * n_channels < raw.size]
+            blk = np.asarray(raw.reshape(-1, n_channels)[rows[0]:rows[-1] + 1])[rows - rows[0]]
+        else:
+            blk = np.asarray(raw[s0 * n_channels:(s0 + n) * n_channels]).reshape(-1, n_channels)
+        if blk.shape[0] < n:
+            raise ValueError(f"{nidq_bin} ends {(n - blk.shape[0]) / NIDQ_FS:.2f} s before the window does")
+        meta = Path(nidq_bin).with_suffix(".meta")
+        rng = next((float(x.split("=", 1)[1]) for x in meta.read_text().splitlines() if x.startswith("niAiRangeMax=")),
+                   10.0) if meta.exists() else 10.0
         path.parent.mkdir(parents=True, exist_ok=True)
-        np.savez(path, emg_v=blk[:, CH_EMG].astype(np.float32) * (10 / 32768),
-                 flow_v=blk[:, CH_FLOW].astype(np.float32) * (10 / 32768))
+        np.savez(path, emg_v=blk[:, emg].astype(np.float32) * (rng / 32768),
+                 flow_v=blk[:, flow].astype(np.float32) * (rng / 32768))
     return path
 
 
@@ -206,28 +286,47 @@ def breaths_and_phase(cache: str, duration: float):
 
 def set_conditions(path, offset_s):
     """Replace the default conditions with those of an epochs file (epoch_change_points.py): list of {name,
-    start_raw_s, end_raw_s} or {name, rule: gasp_flag}; entries with include: false are left unassigned. Spans are
-    converted to file time (CONDITIONS then holds (name, (start_s, end_s)) or (name, None) for the gasp rule)."""
+    start_raw_s, end_raw_s} or {name, rule: gasp_flag}; entries with include: false are left unassigned. Instead of
+    start/end, "spans": [[start_raw_s, end_raw_s], ...] gives a condition several pieces, and on a gasp_flag entry
+    limits it to the gasps inside them (e.g. anoxic vs spontaneous gasping). Spans are converted to file time
+    (CONDITIONS then holds (name, (start_s, end_s)), (name, None) for the gasp rule, or (name, {"spans": [...],
+    "gasp": bool}))."""
     global CONDITIONS, COND_COLOURS
     spec = json.loads(Path(path).read_text(encoding="utf-8"))["conditions"]
     conds = [c for c in spec if c.get("include", True)]
-    CONDITIONS = [(c["name"], None if c.get("rule") == "gasp_flag" else
-                   (c["start_raw_s"] - offset_s, c["end_raw_s"] - offset_s)) for c in conds]
+    CONDITIONS = []
+    for c in conds:
+        spans = c.get("spans") or ([[c["start_raw_s"], c["end_raw_s"]]] if "start_raw_s" in c else None)
+        spans = None if spans is None else [(s0 - offset_s, s1 - offset_s) for s0, s1 in spans]
+        gasp = c.get("rule") == "gasp_flag"
+        if spans is None:
+            CONDITIONS.append((c["name"], None))
+        elif len(spans) == 1 and not gasp:
+            CONDITIONS.append((c["name"], spans[0]))
+        else:
+            CONDITIONS.append((c["name"], {"spans": spans, "gasp": gasp}))
     COND_COLOURS = {c["name"]: c.get("colour", COND_PALETTE[i % len(COND_PALETTE)]) for i, c in enumerate(conds)}
     return spec
 
 
 def assign_conditions(dia_df, epochs):
     """Condition of each breath cycle (onset i to onset i+1). A condition's span is a config epoch name or a
-    (start_s, end_s) pair in file time; None means the Bush-rule gasp cycles."""
+    (start_s, end_s) pair in file time; None means the Bush-rule gasp cycles; a {"spans", "gasp"} dict means the
+    gasp (or non-gasp) cycles inside any of its spans."""
     ons = dia_df["on_sec"].to_numpy()
+    gasp = dia_df["gasp"].to_numpy().astype(bool)
     cond = np.full(ons.size, "", dtype=object)
     for name, ep in CONDITIONS:
         if ep is None:
-            cond[dia_df["gasp"].to_numpy()] = name
+            cond[gasp] = name
+        elif isinstance(ep, dict):
+            inside = np.zeros(ons.size, bool)
+            for t0, t1 in ep["spans"]:
+                inside |= (ons >= t0) & (ons < t1)
+            cond[inside & (gasp if ep["gasp"] else ~gasp)] = name
         else:
             t0, t1 = epochs[ep] if isinstance(ep, str) else ep
-            cond[(ons >= t0) & (ons < t1) & ~dia_df["gasp"].to_numpy()] = name
+            cond[(ons >= t0) & (ons < t1) & ~gasp] = name
     cond[-1] = ""
     return cond
 
@@ -483,8 +582,14 @@ def main():
         figs.make_all(ctx)
         return
     cfg = yaml.safe_load(Path(a.config).read_text())
+    title = a.title or ("e097 anoxia #1" if Path(a.sort) == SORT else cfg.get("experiment_name", Path(a.sort).name))
+    unit_desc = f"bombcell-{a.labels} units, not reviewed" if a.labels else "reviewed single units"
+    nq = nidq_settings(a, cfg)
+    log.info("window %.1f-%.1f s of the run; NIDQ %s (EMG XA%d, airflow XA%d)", a.time_offset_s,
+             a.time_offset_s + a.window_s, nq["bin"], nq["emg"], nq["flow"])
     if not a.nidq_cache:
-        a.nidq_cache = str(nidq_cache(out / "cache" / "nidq_cache.npz", a.nidq_bin, a.time_offset_s, a.window_s))
+        a.nidq_cache = str(nidq_cache(out / "cache" / "nidq_cache.npz", nq["bin"], a.time_offset_s, a.window_s,
+                                      nq["n_channels"], nq["emg"], nq["flow"], nq["sync_map"]))
     epochs = {e["name"]: (e["start_s"], e["end_s"]) for e in cfg["epochs"]}
     if a.conditions_file:
         set_conditions(a.conditions_file, a.time_offset_s)
@@ -561,7 +666,8 @@ def main():
                bcond=bcond, X=X, ks=ks, ref_k=ref_k, F=F, colours=colours, sims=sims, sel=sel, models=models,
                curve_bins=curve_bins, curves=curves, tuning=tuning, Z=Z, pca=pca, P=P, speed=speed,
                ioff_point=ioff_point, pa_names=pa_names, pa_M=pa_M, conditions=[c for c, _ in CONDITIONS],
-               palette=PALETTE, cond_colours=COND_COLOURS, hmm_bin_s=HMM_BIN_S, pca_bin_s=PCA_BIN_S)
+               palette=PALETTE, cond_colours=COND_COLOURS, hmm_bin_s=HMM_BIN_S, pca_bin_s=PCA_BIN_S,
+               title=title, unit_desc=unit_desc)
     with open(out / "cache" / "ctx.pkl", "wb") as f:
         pickle.dump(ctx, f)
     figs.make_all(ctx)
@@ -578,6 +684,7 @@ def main():
         "principal_angle_mean_cosine": {f"{x}|{y}": float(pa_M[i, j]) for i, x in enumerate(pa_names)
                                         for j, y in enumerate(pa_names) if i < j},
         "hmm_selection": sel.round(2).to_dict(orient="records"),
+        "figures_skipped": ctx.get("skipped", []),
     }
     (out / "summary.json").write_text(json.dumps(summary, indent=2, default=float))
     log.info("done: %s", out)
